@@ -5,12 +5,12 @@
     { "src": "api/sse.ts", "use": "@vercel/edge" }
   ],
   "routes": [
-    { "src": "/health", "dest": "/api/bridge" },
-    { "src": "/sse", "dest": "/api/sse" },
+    { "src": "^/sse$", "dest": "/api/sse" },
+    { "src": "^/health$", "dest": "/api/bridge" },
     { "src": "/client/.*", "dest": "/api/bridge" },
     { "src": "/intake/.*", "dest": "/api/bridge" },
     { "src": "/appointments", "dest": "/api/bridge" },
     { "src": "/tax-pros", "dest": "/api/bridge" },
-    { "src": "/", "dest": "/api/bridge" }
+    { "src": "^/$", "dest": "/api/bridge" }
   ]
 }
