@@ -1,0 +1,16 @@
+{
+  "version": 2,
+  "builds": [
+    { "src": "api/bridge.ts", "use": "@vercel/node" },
+    { "src": "api/sse.ts", "use": "@vercel/edge" }
+  ],
+  "routes": [
+    { "src": "/health", "dest": "/api/bridge" },
+    { "src": "/sse", "dest": "/api/sse" },
+    { "src": "/client/.*", "dest": "/api/bridge" },
+    { "src": "/intake/.*", "dest": "/api/bridge" },
+    { "src": "/appointments", "dest": "/api/bridge" },
+    { "src": "/tax-pros", "dest": "/api/bridge" },
+    { "src": "/", "dest": "/api/bridge" }
+  ]
+}
