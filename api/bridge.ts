@@ -1,6 +1,13 @@
 import express from 'express';
 import cors from 'cors';
 import { Request, Response } from 'express';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+// Get __dirname in ESM
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Import from compiled dist directory
 import {
@@ -35,9 +42,23 @@ app.use(cors({ origin: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Serve static tester page from /public if needed
+// Serve static files from public directory
+const publicDir = path.join(__dirname, '..', 'public');
+try {
+  app.use(express.static(publicDir));
+} catch (e) {
+  console.log('Static file serving not available');
+}
+
+// Serve index.html on root
 app.get('/', (_req, res) => {
-  res.type('text/plain').send('Tax Intake MCP Bridge (Vercel) - see /health');
+  try {
+    const indexPath = path.join(publicDir, 'index.html');
+    const html = fs.readFileSync(indexPath, 'utf-8');
+    res.type('text/html').send(html);
+  } catch (e) {
+    res.type('text/plain').send('Tax Intake MCP Bridge - Vercel');
+  }
 });
 
 // Health
