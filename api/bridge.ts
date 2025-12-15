@@ -38,30 +38,31 @@ import {
 import { db } from '../dist/database/index.js';
 
 const app = express();
-app.use(cors({ origin: true }));
+
+// Enhanced CORS configuration for ChatGPT
+app.use(cors({
+  origin: true,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+}));
+
+// Add explicit CORS headers middleware
+app.use((_req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS,PATCH');
+  res.header('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  next();
+});
+
+// Handle preflight requests
+app.options('*', cors());
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Serve static files from public directory
-const publicDir = path.join(__dirname, '..', 'public');
-try {
-  app.use(express.static(publicDir));
-} catch (e) {
-  console.log('Static file serving not available');
-}
-
-// Serve index.html on root
-app.get('/', (_req, res) => {
-  try {
-    const indexPath = path.join(publicDir, 'index.html');
-    const html = fs.readFileSync(indexPath, 'utf-8');
-    res.type('text/html').send(html);
-  } catch (e) {
-    res.type('text/plain').send('Tax Intake MCP Bridge - Vercel');
-  }
-});
-
-// Health
+// Health check (API route - BEFORE static files)
 app.get('/health', (_req, res) => {
   res.json({ ok: true, platform: 'vercel', service: 'tax-intake-mcp-bridge' });
 });
@@ -188,6 +189,25 @@ app.get('/sse', (req: Request, res: Response) => {
   });
   res.write(`event: ready\n`);
   res.write(`data: {"service":"tax-intake-mcp-bridge-vercel"}\n\n`);
+});
+
+// Serve static files AFTER all API routes
+const publicDir = path.join(__dirname, '..', 'public');
+try {
+  app.use(express.static(publicDir));
+} catch (e) {
+  console.log('Static file serving not available');
+}
+
+// Serve index.html on root as fallback
+app.get('/', (_req, res) => {
+  try {
+    const indexPath = path.join(publicDir, 'index.html');
+    const html = fs.readFileSync(indexPath, 'utf-8');
+    res.type('text/html').send(html);
+  } catch (e) {
+    res.type('text/plain').send('Tax Intake MCP Bridge - Vercel');
+  }
 });
 
 export default app;
