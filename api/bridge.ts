@@ -36,6 +36,7 @@ import {
   getTaxProRecommendations,
 } from '../dist/services/routing.js';
 import { db } from '../dist/database/index.js';
+import { createMcpServer, transports, createSseTransport } from '../dist/mcp-sse.js';
 
 const app = express();
 
@@ -230,22 +231,66 @@ app.get('/client/:clientId/recommendations', (req: Request, res: Response) => {
   res.type('text/plain').send(recs);
 });
 
-// Minimal SSE for Vercel (will be proxied, note: Vercel may buffer SSE)
-app.get('/sse', (req: Request, res: Response) => {
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  (res as any).flushHeaders?.();
-  const ping = setInterval(() => {
-    res.write(`event: ping\n`);
-    res.write(`data: {"ts": ${Date.now()}}\n\n`);
-  }, 25000);
-  req.on('close', () => {
-    clearInterval(ping);
-    try { res.end(); } catch {}
-  });
-  res.write(`event: ready\n`);
-  res.write(`data: {"service":"tax-intake-mcp-bridge-vercel"}\n\n`);
+// MCP SSE endpoint - ChatGPT connects here
+app.get('/sse', async (req: Request, res: Response) => {
+  console.log('Received GET request to /sse (establishing MCP SSE stream)');
+  
+  try {
+    // Create a new SSE transport for the client
+    const transport = createSseTransport('/messages', res as any);
+    
+    // Store the transport by session ID
+    const sessionId = transport.sessionId;
+    transports[sessionId] = transport;
+    
+    // Set up onclose handler to clean up transport when closed
+    transport.onclose = () => {
+      console.log(`SSE transport closed for session ${sessionId}`);
+      delete transports[sessionId];
+    };
+    
+    // Connect the transport to a new MCP server instance
+    const server = createMcpServer();
+    await server.connect(transport);
+    
+    console.log(`Established MCP SSE stream with session ID: ${sessionId}`);
+  } catch (error) {
+    console.error('Error establishing SSE stream:', error);
+    if (!res.headersSent) {
+      res.status(500).send('Error establishing SSE stream');
+    }
+  }
+});
+
+// MCP Messages endpoint - receives JSON-RPC requests from ChatGPT
+app.post('/messages', async (req: Request, res: Response) => {
+  console.log('Received POST request to /messages');
+  
+  // Extract session ID from URL query parameter
+  const sessionId = req.query.sessionId as string;
+  
+  if (!sessionId) {
+    console.error('No session ID provided in request URL');
+    res.status(400).send('Missing sessionId parameter');
+    return;
+  }
+  
+  const transport = transports[sessionId];
+  if (!transport) {
+    console.error(`No active transport found for session ID: ${sessionId}`);
+    res.status(404).send('Session not found');
+    return;
+  }
+  
+  try {
+    // Handle the POST message with the transport
+    await transport.handlePostMessage(req as any, res as any, req.body);
+  } catch (error) {
+    console.error('Error handling request:', error);
+    if (!res.headersSent) {
+      res.status(500).send('Error handling request');
+    }
+  }
 });
 
 // Serve index.html on root only

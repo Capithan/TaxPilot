@@ -6,6 +6,7 @@
     { "src": "^/openapi.yaml$", "dest": "/api/bridge", "continue": false },
     { "src": "^/privacy$", "dest": "/api/bridge", "continue": false },
     { "src": "^/sse$", "dest": "/api/bridge", "continue": false },
+    { "src": "^/messages.*", "dest": "/api/bridge", "continue": false },
     { "src": "^/health$", "dest": "/api/bridge", "continue": false },
     { "src": "^/client/.*", "dest": "/api/bridge", "continue": false },
     { "src": "^/intake/.*", "dest": "/api/bridge", "continue": false },
