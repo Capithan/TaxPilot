@@ -6,8 +6,8 @@ info:
     Streamlines client intake, automates document collection, and optimizes appointment scheduling.
   version: 1.0.0
 servers:
-  - url: https://YOUR-VERCEL-APP.vercel.app
-    description: Production server (replace with your actual Vercel URL)
+  - url: https://tax-pilot-six.vercel.app
+    description: Production server
 
 paths:
   /intake/start:
