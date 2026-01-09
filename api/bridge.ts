@@ -67,6 +67,39 @@ app.get('/health', (_req, res) => {
   res.json({ ok: true, platform: 'vercel', service: 'tax-intake-mcp-bridge' });
 });
 
+// OpenAPI specification for ChatGPT Actions
+app.get('/openapi.yaml', (_req, res) => {
+  try {
+    const publicDir = path.join(__dirname, '..', 'public');
+    const openapiPath = path.join(publicDir, 'openapi.yaml');
+    const yaml = fs.readFileSync(openapiPath, 'utf-8');
+    res.type('text/yaml').send(yaml);
+  } catch (e) {
+    res.status(404).json({ error: 'OpenAPI spec not found' });
+  }
+});
+
+// Privacy policy for ChatGPT
+app.get('/privacy', (_req, res) => {
+  try {
+    const publicDir = path.join(__dirname, '..', 'public');
+    const privacyPath = path.join(publicDir, 'privacy.html');
+    const html = fs.readFileSync(privacyPath, 'utf-8');
+    res.type('text/html').send(html);
+  } catch (e) {
+    res.type('text/html').send(`
+      <html>
+        <head><title>Privacy Policy - Tax Intake</title></head>
+        <body>
+          <h1>Privacy Policy</h1>
+          <p>This API collects tax-related information for appointment preparation purposes only.</p>
+          <p>Data is not shared with third parties and is used solely for tax preparation services.</p>
+        </body>
+      </html>
+    `);
+  }
+});
+
 // Intake
 app.post('/intake/start', (req: Request, res: Response) => {
   const { clientId } = req.body || {};

@@ -1,6 +1,8 @@
 {
   "version": 2,
   "routes": [
+    { "src": "^/openapi.yaml$", "dest": "/api/bridge", "continue": false },
+    { "src": "^/privacy$", "dest": "/api/bridge", "continue": false },
     { "src": "^/sse$", "dest": "/api/bridge", "continue": false },
     { "src": "^/health$", "dest": "/api/bridge", "continue": false },
     { "src": "^/client/.*", "dest": "/api/bridge", "continue": false },

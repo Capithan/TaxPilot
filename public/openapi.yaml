@@ -1,0 +1,365 @@
+openapi: 3.1.0
+info:
+  title: Tax Intake API
+  description: |
+    Tax Client Intake & Appointment Optimization API for tax professionals.
+    Streamlines client intake, automates document collection, and optimizes appointment scheduling.
+  version: 1.0.0
+servers:
+  - url: https://YOUR-VERCEL-APP.vercel.app
+    description: Production server (replace with your actual Vercel URL)
+
+paths:
+  /intake/start:
+    post:
+      operationId: startIntake
+      summary: Start a new client intake session
+      description: Begins a new tax intake session for a client. Returns a session ID and the first question to ask.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                clientId:
+                  type: string
+                  description: Optional existing client ID. If not provided, a new client is created.
+      responses:
+        "200":
+          description: Intake session started successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessionId:
+                    type: string
+                  clientId:
+                    type: string
+                  currentStep:
+                    type: string
+                  nextQuestion:
+                    type: string
+
+  /intake/respond:
+    post:
+      operationId: processIntakeResponse
+      summary: Process a client's response during intake
+      description: Submit the client's answer to the current intake question and get the next question.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - answer
+              properties:
+                sessionId:
+                  type: string
+                  description: The intake session ID
+                answer:
+                  type: string
+                  description: The client's answer to the current question
+      responses:
+        "200":
+          description: Response processed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  complete:
+                    type: boolean
+                  nextQuestion:
+                    type: string
+                  progress:
+                    type: object
+
+  /intake/progress/{sessionId}:
+    get:
+      operationId: getIntakeProgress
+      summary: Get intake progress
+      description: Check the current progress of an intake session.
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Progress information
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /client/{clientId}/summary:
+    get:
+      operationId: getClientSummary
+      summary: Get complete client information
+      description: Returns a formatted summary of all collected client information.
+      parameters:
+        - name: clientId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Client summary
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /client/{clientId}/checklist/generate:
+    post:
+      operationId: generateChecklist
+      summary: Generate personalized document checklist
+      description: Creates a personalized document checklist based on the client's tax situation.
+      parameters:
+        - name: clientId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Generated checklist
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /client/{clientId}/checklist:
+    get:
+      operationId: getChecklist
+      summary: Get current document checklist
+      description: Retrieves the current document checklist for a client.
+      parameters:
+        - name: clientId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Document checklist
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /client/{clientId}/checklist/collect:
+    post:
+      operationId: markDocumentCollected
+      summary: Mark a document as collected
+      description: Marks a specific document as received from the client.
+      parameters:
+        - name: clientId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - documentId
+              properties:
+                documentId:
+                  type: string
+                  description: The ID of the document to mark as collected
+      responses:
+        "200":
+          description: Document marked as collected
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /client/{clientId}/checklist/pending:
+    get:
+      operationId: getPendingDocuments
+      summary: Get pending documents
+      description: Lists all documents still needed from the client.
+      parameters:
+        - name: clientId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of pending documents
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+
+  /client/{clientId}/reminders/documents:
+    post:
+      operationId: createDocumentReminders
+      summary: Create document reminders
+      description: Creates reminder messages for pending documents.
+      parameters:
+        - name: clientId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                appointmentId:
+                  type: string
+      responses:
+        "200":
+          description: Reminder messages
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /client/{clientId}/reminders:
+    get:
+      operationId: getClientReminders
+      summary: Get all reminders for a client
+      description: Retrieves all scheduled reminders for a client.
+      parameters:
+        - name: clientId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Client reminders
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /client/{clientId}/route:
+    post:
+      operationId: routeToTaxPro
+      summary: Route client to tax professional
+      description: Analyzes client complexity and matches them to the appropriate tax professional.
+      parameters:
+        - name: clientId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Routing result with matched tax professional
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /client/{clientId}/appointment/estimate:
+    get:
+      operationId: getAppointmentEstimate
+      summary: Get appointment time estimate
+      description: Estimates appointment duration based on complexity and intake completion.
+      parameters:
+        - name: clientId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Appointment estimate
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /client/{clientId}/recommendations:
+    get:
+      operationId: getTaxProRecommendations
+      summary: Get tax professional recommendations
+      description: Get a list of recommended tax professionals based on client needs.
+      parameters:
+        - name: clientId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Tax professional recommendations
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /appointments:
+    post:
+      operationId: createAppointment
+      summary: Create an appointment
+      description: Schedules an appointment between a client and tax professional.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - clientId
+                - taxProId
+                - scheduledAt
+              properties:
+                clientId:
+                  type: string
+                taxProId:
+                  type: string
+                scheduledAt:
+                  type: string
+                  format: date-time
+                type:
+                  type: string
+                  enum: [in-person, virtual]
+      responses:
+        "200":
+          description: Appointment created
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /health:
+    get:
+      operationId: healthCheck
+      summary: Health check
+      description: Check if the API is running.
+      responses:
+        "200":
+          description: API is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  platform:
+                    type: string
+                  service:
+                    type: string
