@@ -62,6 +62,30 @@ app.options('*', cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// ChatGPT Plugin manifest
+app.get('/.well-known/ai-plugin.json', (_req, res) => {
+  try {
+    const publicDir = path.join(__dirname, '..', 'public');
+    const manifestPath = path.join(publicDir, '.well-known', 'ai-plugin.json');
+    const manifest = fs.readFileSync(manifestPath, 'utf-8');
+    res.type('application/json').send(manifest);
+  } catch (e) {
+    res.status(404).json({ error: 'Plugin manifest not found' });
+  }
+});
+
+// Logo for ChatGPT Plugin
+app.get('/logo.png', (_req, res) => {
+  try {
+    const publicDir = path.join(__dirname, '..', 'public');
+    const logoPath = path.join(publicDir, 'logo.png');
+    res.sendFile(logoPath);
+  } catch (e) {
+    // Return a simple SVG as fallback
+    res.type('image/svg+xml').send(`<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512"><rect fill="#2563eb" width="512" height="512" rx="64"/><text x="256" y="300" font-size="200" fill="white" text-anchor="middle" font-family="Arial">T</text></svg>`);
+  }
+});
+
 // Health check (API route - BEFORE static files)
 app.get('/health', (_req, res) => {
   res.json({ ok: true, platform: 'vercel', service: 'tax-intake-mcp-bridge' });

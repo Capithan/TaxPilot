@@ -1,6 +1,8 @@
 {
   "version": 2,
   "routes": [
+    { "src": "^/.well-known/ai-plugin.json$", "dest": "/api/bridge", "continue": false },
+    { "src": "^/logo.png$", "dest": "/api/bridge", "continue": false },
     { "src": "^/openapi.yaml$", "dest": "/api/bridge", "continue": false },
     { "src": "^/privacy$", "dest": "/api/bridge", "continue": false },
     { "src": "^/sse$", "dest": "/api/bridge", "continue": false },
