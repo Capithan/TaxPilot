@@ -9,9 +9,9 @@
   },
   "api": {
     "type": "openapi",
-    "url": "https://tax-pilot-six.vercel.app/openapi.yaml"
+    "url": "https://taxpilot-e9ewftfzehcvdmbf.centralus-01.azurewebsites.net/openapi.yaml"
   },
-  "logo_url": "https://tax-pilot-six.vercel.app/logo.png",
+  "logo_url": "https://taxpilot-e9ewftfzehcvdmbf.centralus-01.azurewebsites.net/logo.png",
   "contact_email": "support@example.com",
-  "legal_info_url": "https://tax-pilot-six.vercel.app/privacy"
+  "legal_info_url": "https://taxpilot-e9ewftfzehcvdmbf.centralus-01.azurewebsites.net/privacy"
 }

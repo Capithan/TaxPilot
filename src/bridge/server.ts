@@ -1,5 +1,8 @@
 import express from 'express';
 import cors from 'cors';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { Request, Response } from 'express';
 import {
   startIntakeSession,
@@ -30,16 +33,68 @@ import {
   getTaxProRecommendations,
 } from '../services/routing.js';
 import { db } from '../database/index.js';
+import { createMcpServer, transports, createSseTransport } from '../mcp-sse.js';
+
+// Get __dirname in ESM
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
-app.use(cors({ origin: true }));
+
+// Enhanced CORS for ChatGPT
+app.use(cors({
+  origin: true,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+}));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static('public'));
 
+// ChatGPT Plugin manifest
+app.get('/.well-known/ai-plugin.json', (_req, res) => {
+  try {
+    const publicDir = path.join(__dirname, '..', '..', 'public');
+    const manifestPath = path.join(publicDir, '.well-known', 'ai-plugin.json');
+    const manifest = fs.readFileSync(manifestPath, 'utf-8');
+    res.type('application/json').send(manifest);
+  } catch (e) {
+    res.status(404).json({ error: 'Plugin manifest not found' });
+  }
+});
+
+// OpenAPI specification
+app.get('/openapi.yaml', (_req, res) => {
+  try {
+    const publicDir = path.join(__dirname, '..', '..', 'public');
+    const openapiPath = path.join(publicDir, 'openapi.yaml');
+    const yaml = fs.readFileSync(openapiPath, 'utf-8');
+    res.type('text/yaml').send(yaml);
+  } catch (e) {
+    res.status(404).json({ error: 'OpenAPI spec not found' });
+  }
+});
+
+// Privacy policy
+app.get('/privacy', (_req, res) => {
+  try {
+    const publicDir = path.join(__dirname, '..', '..', 'public');
+    const privacyPath = path.join(publicDir, 'privacy.html');
+    const html = fs.readFileSync(privacyPath, 'utf-8');
+    res.type('text/html').send(html);
+  } catch (e) {
+    res.type('text/html').send(`
+      <html><head><title>Privacy Policy</title></head>
+      <body><h1>Privacy Policy</h1><p>This API collects tax-related information for appointment preparation only.</p></body></html>
+    `);
+  }
+});
+
 // Simple health check
 app.get('/health', (_req, res) => {
-  res.json({ ok: true, service: 'tax-intake-mcp-bridge' });
+  res.json({ ok: true, service: 'tax-intake-mcp-bridge', platform: 'azure' });
 });
 
 // Intake endpoints
@@ -153,29 +208,97 @@ app.get('/tax-pros', (_req: Request, res: Response) => {
   res.json(pros);
 });
 
-// Minimal SSE endpoint: emits heartbeat and can later be extended to stream tool outputs
-app.get('/sse', (req: Request, res: Response) => {
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.flushHeaders?.();
+// MCP SSE endpoint - ChatGPT connects here
+app.get('/sse', async (req: Request, res: Response) => {
+  console.log('Received GET request to /sse (establishing MCP SSE stream)');
+  
+  try {
+    // Create a new SSE transport for the client
+    const transport = createSseTransport('/messages', res as any);
+    
+    // Store the transport by session ID
+    const sessionId = transport.sessionId;
+    transports[sessionId] = transport;
+    
+    // Set up onclose handler to clean up transport when closed
+    transport.onclose = () => {
+      console.log(`SSE transport closed for session ${sessionId}`);
+      delete transports[sessionId];
+    };
+    
+    // Connect the transport to a new MCP server instance
+    const server = createMcpServer();
+    await server.connect(transport);
+    
+    console.log(`Established MCP SSE stream with session ID: ${sessionId}`);
+  } catch (error) {
+    console.error('Error establishing SSE stream:', error);
+    if (!res.headersSent) {
+      res.status(500).send('Error establishing SSE stream');
+    }
+  }
+});
 
-  const ping = setInterval(() => {
-    res.write(`event: ping\n`);
-    res.write(`data: {"ts": ${Date.now()}}\n\n`);
-  }, 25000);
+// MCP Messages endpoint - receives JSON-RPC requests from ChatGPT
+app.post('/messages', async (req: Request, res: Response) => {
+  console.log('Received POST request to /messages');
+  
+  // Extract session ID from URL query parameter
+  const sessionId = req.query.sessionId as string;
+  
+  if (!sessionId) {
+    console.error('No session ID provided in request URL');
+    res.status(400).send('Missing sessionId parameter');
+    return;
+  }
+  
+  const transport = transports[sessionId];
+  if (!transport) {
+    console.error(`No active transport found for session ID: ${sessionId}`);
+    res.status(404).send('Session not found');
+    return;
+  }
+  
+  try {
+    // Handle the POST message with the transport
+    await transport.handlePostMessage(req as any, res as any, req.body);
+  } catch (error) {
+    console.error('Error handling request:', error);
+    if (!res.headersSent) {
+      res.status(500).send('Error handling request');
+    }
+  }
+});
 
-  req.on('close', () => {
-    clearInterval(ping);
-    try { res.end(); } catch {}
+// Root endpoint
+app.get('/', (_req: Request, res: Response) => {
+  res.type('text/html').send(`
+    <!DOCTYPE html>
+    <html>
+    <head><title>Tax Intake MCP Server</title></head>
+    <body>
+      <h1>Tax Intake MCP Server</h1>
+      <p>This is an MCP server for tax client intake and appointment optimization.</p>
+      <h2>Endpoints:</h2>
+      <ul>
+        <li><a href="/health">/health</a> - Health check</li>
+        <li><a href="/openapi.yaml">/openapi.yaml</a> - OpenAPI specification</li>
+        <li><a href="/privacy">/privacy</a> - Privacy policy</li>
+        <li>/sse - MCP SSE endpoint (for ChatGPT)</li>
+      </ul>
+    </body>
+    </html>
+  `);
+});
+
+// Export app for external use (e.g., Azure)
+export default app;
+
+// Only start server if running directly (not imported)
+const isMainModule = import.meta.url === `file://${process.argv[1].replace(/\\/g, '/')}`;
+if (isMainModule) {
+  const PORT = process.env.PORT || 3001;
+  app.listen(PORT, () => {
+    console.log(`Tax Intake MCP Server running on http://localhost:${PORT}`);
   });
-
-  res.write(`event: ready\n`);
-  res.write(`data: {"service":"tax-intake-mcp-bridge"}\n\n`);
-});
-
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
-  console.log(`Tax Intake UI & HTTP Bridge running on http://localhost:${PORT}`);
-  console.log(`Open your browser to: http://localhost:${PORT}`);
-});
+}

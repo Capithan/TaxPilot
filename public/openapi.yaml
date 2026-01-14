@@ -6,8 +6,8 @@ info:
     Streamlines client intake, automates document collection, and optimizes appointment scheduling.
   version: 1.0.0
 servers:
-  - url: https://tax-pilot-six.vercel.app
-    description: Production server
+  - url: https://taxpilot-e9ewftfzehcvdmbf.centralus-01.azurewebsites.net
+    description: Azure Production server
 
 paths:
   /intake/start:
