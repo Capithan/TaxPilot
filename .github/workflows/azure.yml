@@ -26,9 +26,14 @@ jobs:
     - name: Build TypeScript
       run: npm run build
 
+    - name: Create deployment package
+      run: |
+        zip -r deploy.zip . -x "*.git*" -x "node_modules/*" -x "src/*"
+
     - name: Deploy to Azure Web App
       uses: azure/webapps-deploy@v2
       with:
         app-name: 'taxpilot-e9ewftfzehcvdmbf'
         publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-        package: .
+        package: deploy.zip
+
