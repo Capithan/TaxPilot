@@ -221,9 +221,75 @@ function handleToolCall(name, args) {
         return { content: [{ type: 'text', text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
     }
 }
-// MCP SSE endpoint - ChatGPT Developer Mode connects here
+// MCP Streamable HTTP transport - handles both GET (SSE) and POST (JSON-RPC)
+// This implements the 2025-03-26 spec that ChatGPT uses
+// POST handler for Streamable HTTP - receives JSON-RPC requests
+app.post('/sse', (req, res) => {
+    console.log('MCP POST request received:', req.body?.method);
+    const { jsonrpc, method, params, id } = req.body || {};
+    // Handle initialize request
+    if (method === 'initialize') {
+        const sessionId = crypto.randomUUID();
+        // Return JSON response with capabilities
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Mcp-Session-Id', sessionId);
+        res.json({
+            jsonrpc: '2.0',
+            id,
+            result: {
+                protocolVersion: params?.protocolVersion || '2024-11-05',
+                serverInfo: { name: 'tax-intake-mcp', version: '1.0.0' },
+                capabilities: {
+                    tools: { listChanged: false }
+                }
+            }
+        });
+        console.log(`MCP session initialized: ${sessionId}`);
+        return;
+    }
+    // Handle notifications/initialized
+    if (method === 'notifications/initialized') {
+        res.status(202).send();
+        return;
+    }
+    // Handle tools/list
+    if (method === 'tools/list') {
+        res.setHeader('Content-Type', 'application/json');
+        res.json({
+            jsonrpc: '2.0',
+            id,
+            result: { tools: mcpTools }
+        });
+        return;
+    }
+    // Handle tools/call
+    if (method === 'tools/call') {
+        const toolResult = handleToolCall(params?.name, params?.arguments || {});
+        res.setHeader('Content-Type', 'application/json');
+        res.json({
+            jsonrpc: '2.0',
+            id,
+            result: toolResult
+        });
+        return;
+    }
+    // Handle ping
+    if (method === 'ping') {
+        res.setHeader('Content-Type', 'application/json');
+        res.json({ jsonrpc: '2.0', id, result: {} });
+        return;
+    }
+    // Unknown method
+    res.setHeader('Content-Type', 'application/json');
+    res.status(400).json({
+        jsonrpc: '2.0',
+        id,
+        error: { code: -32601, message: `Method not found: ${method}` }
+    });
+});
+// GET handler for legacy SSE transport (backwards compatibility)
 app.get('/sse', (req, res) => {
-    console.log('SSE connection requested');
+    console.log('SSE GET connection requested (legacy transport)');
     // Disable request timeout for SSE
     req.setTimeout(0);
     res.setTimeout(0);
