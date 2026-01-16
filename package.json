@@ -11,8 +11,7 @@
     "dev": "tsx src/index.ts",
     "bridge": "tsx src/bridge/server.ts",
     "start:bridge": "node dist/bridge/server.js",
-    "watch": "tsc --watch",
-    "postinstall": "npm run build"
+    "watch": "tsc --watch"
   },
   "engines": {
     "node": ">=18.0.0"
