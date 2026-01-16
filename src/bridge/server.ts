@@ -2,9 +2,9 @@ import express from 'express';
 import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { Request, Response } from 'express';
-import { v4 as uuidv4 } from 'uuid';
 import {
   startIntakeSession,
   processIntakeResponse,
@@ -281,8 +281,8 @@ app.get('/sse', (req: Request, res: Response) => {
   res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
   
-  // Generate session ID
-  const sessionId = uuidv4();
+  // Generate session ID using crypto
+  const sessionId = crypto.randomUUID();
   sseSessions.set(sessionId, res);
   
   // Send endpoint event (MCP protocol)
