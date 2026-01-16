@@ -3,16 +3,18 @@ import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { v4 as uuidv4 } from 'uuid';
 import { startIntakeSession, processIntakeResponse, getIntakeProgress, getIntakeSummary, } from '../services/intake.js';
 import { generateDocumentChecklist, getDocumentChecklist, markDocumentCollected, getPendingDocuments, formatChecklistForDisplay, } from '../services/checklist.js';
 import { createDocumentReminder, getClientReminders, sendReminder, formatRemindersForDisplay, } from '../services/reminders.js';
 import { routeClientToTaxPro, createAppointment, getAppointmentEstimate, getTaxProRecommendations, } from '../services/routing.js';
 import { db } from '../database/index.js';
-import { createMcpServer, transports, createSseTransport } from '../mcp-sse.js';
 // Get __dirname in ESM
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const app = express();
+// Store active SSE sessions
+const sseSessions = new Map();
 // Enhanced CORS for ChatGPT
 app.use(cors({
     origin: true,
@@ -161,58 +163,155 @@ app.get('/tax-pros', (_req, res) => {
     const pros = db.getAllTaxPros();
     res.json(pros);
 });
-// MCP SSE endpoint - ChatGPT connects here
-app.get('/sse', async (req, res) => {
-    console.log('Received GET request to /sse (establishing MCP SSE stream)');
+// Define available MCP tools
+const mcpTools = [
+    { name: 'start_intake', description: 'Start a new client intake session', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } } } },
+    { name: 'process_intake_response', description: 'Process client response during intake', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, answer: { type: 'string' } }, required: ['sessionId', 'answer'] } },
+    { name: 'get_intake_progress', description: 'Get intake session progress', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
+    { name: 'get_client_summary', description: 'Get complete client summary', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'] } },
+    { name: 'generate_document_checklist', description: 'Generate personalized document checklist', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'] } },
+    { name: 'get_pending_documents', description: 'Get pending documents list', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'] } },
+    { name: 'route_to_tax_pro', description: 'Route client to appropriate tax professional', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'] } },
+    { name: 'get_appointment_estimate', description: 'Estimate appointment duration', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'] } },
+];
+// Handle MCP tool calls
+function handleToolCall(name, args) {
     try {
-        // Create a new SSE transport for the client
-        const transport = createSseTransport('/messages', res);
-        // Store the transport by session ID
-        const sessionId = transport.sessionId;
-        transports[sessionId] = transport;
-        // Set up onclose handler to clean up transport when closed
-        transport.onclose = () => {
-            console.log(`SSE transport closed for session ${sessionId}`);
-            delete transports[sessionId];
-        };
-        // Connect the transport to a new MCP server instance
-        const server = createMcpServer();
-        await server.connect(transport);
-        console.log(`Established MCP SSE stream with session ID: ${sessionId}`);
-    }
-    catch (error) {
-        console.error('Error establishing SSE stream:', error);
-        if (!res.headersSent) {
-            res.status(500).send('Error establishing SSE stream');
+        switch (name) {
+            case 'start_intake': {
+                const result = startIntakeSession(args?.clientId);
+                return { content: [{ type: 'text', text: `Session started!\nSession ID: ${result.session.id}\nClient ID: ${result.client.id}\n\n${result.nextQuestion}` }] };
+            }
+            case 'process_intake_response': {
+                const result = processIntakeResponse(args.sessionId, args.answer);
+                if (result.intakeCompleted) {
+                    return { content: [{ type: 'text', text: `Intake complete! Client ID: ${result.client?.id}` }] };
+                }
+                return { content: [{ type: 'text', text: result.nextQuestion || 'Processing...' }] };
+            }
+            case 'get_intake_progress': {
+                const progress = getIntakeProgress(args.sessionId);
+                return { content: [{ type: 'text', text: JSON.stringify(progress, null, 2) }] };
+            }
+            case 'get_client_summary': {
+                const summary = getIntakeSummary(args.clientId);
+                return { content: [{ type: 'text', text: summary }] };
+            }
+            case 'generate_document_checklist': {
+                const checklist = generateDocumentChecklist(args.clientId);
+                return { content: [{ type: 'text', text: formatChecklistForDisplay(checklist) }] };
+            }
+            case 'get_pending_documents': {
+                const pending = getPendingDocuments(args.clientId);
+                return { content: [{ type: 'text', text: JSON.stringify(pending, null, 2) }] };
+            }
+            case 'route_to_tax_pro': {
+                const result = routeClientToTaxPro(args.clientId);
+                return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+            }
+            case 'get_appointment_estimate': {
+                const estimate = getAppointmentEstimate(args.clientId);
+                return { content: [{ type: 'text', text: estimate.message }] };
+            }
+            default:
+                return { content: [{ type: 'text', text: `Unknown tool: ${name}` }] };
         }
     }
+    catch (error) {
+        return { content: [{ type: 'text', text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
+    }
+}
+// MCP SSE endpoint - ChatGPT Developer Mode connects here
+app.get('/sse', (req, res) => {
+    console.log('SSE connection requested');
+    // Set SSE headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+    // Generate session ID
+    const sessionId = uuidv4();
+    sseSessions.set(sessionId, res);
+    // Send endpoint event (MCP protocol)
+    res.write(`event: endpoint\n`);
+    res.write(`data: /messages?sessionId=${sessionId}\n\n`);
+    // Send server info
+    const serverInfo = {
+        jsonrpc: '2.0',
+        method: 'notifications/initialized',
+        params: {
+            serverInfo: { name: 'tax-intake-mcp', version: '1.0.0' },
+            capabilities: { tools: {} }
+        }
+    };
+    res.write(`event: message\n`);
+    res.write(`data: ${JSON.stringify(serverInfo)}\n\n`);
+    // Keep-alive ping
+    const pingInterval = setInterval(() => {
+        if (!res.writableEnded) {
+            res.write(`:ping\n\n`);
+        }
+    }, 25000);
+    // Cleanup on close
+    req.on('close', () => {
+        clearInterval(pingInterval);
+        sseSessions.delete(sessionId);
+        console.log(`SSE session ${sessionId} closed`);
+    });
+    console.log(`SSE session ${sessionId} established`);
 });
-// MCP Messages endpoint - receives JSON-RPC requests from ChatGPT
-app.post('/messages', async (req, res) => {
-    console.log('Received POST request to /messages');
-    // Extract session ID from URL query parameter
+// MCP Messages endpoint - receives JSON-RPC requests
+app.post('/messages', (req, res) => {
     const sessionId = req.query.sessionId;
     if (!sessionId) {
-        console.error('No session ID provided in request URL');
-        res.status(400).send('Missing sessionId parameter');
-        return;
+        return res.status(400).json({ jsonrpc: '2.0', error: { code: -32600, message: 'Missing sessionId' }, id: null });
     }
-    const transport = transports[sessionId];
-    if (!transport) {
-        console.error(`No active transport found for session ID: ${sessionId}`);
-        res.status(404).send('Session not found');
-        return;
+    const sseRes = sseSessions.get(sessionId);
+    if (!sseRes) {
+        return res.status(404).json({ jsonrpc: '2.0', error: { code: -32600, message: 'Session not found' }, id: null });
     }
-    try {
-        // Handle the POST message with the transport
-        await transport.handlePostMessage(req, res, req.body);
+    const { jsonrpc, method, params, id } = req.body;
+    console.log(`MCP request: ${method}`, params);
+    let response;
+    switch (method) {
+        case 'initialize':
+            response = {
+                jsonrpc: '2.0',
+                id,
+                result: {
+                    protocolVersion: '2024-11-05',
+                    serverInfo: { name: 'tax-intake-mcp', version: '1.0.0' },
+                    capabilities: { tools: {} }
+                }
+            };
+            break;
+        case 'tools/list':
+            response = {
+                jsonrpc: '2.0',
+                id,
+                result: { tools: mcpTools }
+            };
+            break;
+        case 'tools/call':
+            const toolResult = handleToolCall(params.name, params.arguments || {});
+            response = {
+                jsonrpc: '2.0',
+                id,
+                result: toolResult
+            };
+            break;
+        case 'ping':
+            response = { jsonrpc: '2.0', id, result: {} };
+            break;
+        default:
+            response = {
+                jsonrpc: '2.0',
+                id,
+                error: { code: -32601, message: `Method not found: ${method}` }
+            };
     }
-    catch (error) {
-        console.error('Error handling request:', error);
-        if (!res.headersSent) {
-            res.status(500).send('Error handling request');
-        }
-    }
+    res.json(response);
 });
 // Root endpoint
 app.get('/', (_req, res) => {
