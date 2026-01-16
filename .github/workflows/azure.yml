@@ -26,14 +26,22 @@ jobs:
     - name: Build TypeScript
       run: npm run build
 
-    - name: Create deployment package
+    - name: Deploy using Kudu ZIP Deploy
+      env:
+        PUBLISH_PROFILE: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
       run: |
-        zip -r deploy.zip . -x "*.git*" -x "node_modules/*" -x "src/*"
+        # Extract credentials from publish profile
+        USERNAME=$(echo "$PUBLISH_PROFILE" | grep -oP 'userName="\K[^"]+' | head -1)
+        PASSWORD=$(echo "$PUBLISH_PROFILE" | grep -oP 'userPWD="\K[^"]+' | head -1)
+        
+        # Create zip excluding unnecessary files
+        zip -r deploy.zip . -x "*.git*" -x "node_modules/*" -x "src/*" -x ".github/*"
+        
+        # Deploy via Kudu API
+        curl -X POST \
+          -u "$USERNAME:$PASSWORD" \
+          --data-binary @deploy.zip \
+          "https://taxpilot-e9ewftfzehcvdmbf.scm.centralus-01.azurewebsites.net/api/zipdeploy" \
+          -H "Content-Type: application/zip"
 
-    - name: Deploy to Azure Web App
-      uses: azure/webapps-deploy@v2
-      with:
-        app-name: 'taxpilot-e9ewftfzehcvdmbf'
-        publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-        package: deploy.zip
 
