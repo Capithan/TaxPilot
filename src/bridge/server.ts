@@ -56,6 +56,18 @@ app.use(cors({
 // Handle preflight OPTIONS requests
 app.options('*', cors());
 
+// Request logging middleware
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  console.log('  Headers:', JSON.stringify({
+    'content-type': req.headers['content-type'],
+    'accept': req.headers['accept'],
+    'origin': req.headers['origin'],
+    'user-agent': req.headers['user-agent']?.substring(0, 50)
+  }));
+  next();
+});
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.text({ type: 'text/plain' }));
@@ -280,22 +292,25 @@ function handleToolCall(name: string, args: Record<string, unknown>): { content:
 
 // POST handler for Streamable HTTP - receives JSON-RPC requests
 app.post('/sse', (req: Request, res: Response) => {
-  console.log('MCP POST request received');
-  console.log('Headers:', JSON.stringify(req.headers));
+  console.log('=== MCP POST /sse request ===');
+  console.log('Content-Type:', req.headers['content-type']);
+  console.log('Accept:', req.headers['accept']);
+  console.log('Raw body type:', typeof req.body);
   console.log('Body:', JSON.stringify(req.body));
   
   // If body is empty or not JSON, return error with details
   if (!req.body || Object.keys(req.body).length === 0) {
-    console.log('Empty body received');
+    console.log('Empty body received - returning 400');
     res.setHeader('Content-Type', 'application/json');
     return res.status(400).json({
       jsonrpc: '2.0',
       id: null,
-      error: { code: -32700, message: 'Parse error: Empty request body' }
+      error: { code: -32700, message: 'Parse error: Empty request body. Ensure Content-Type is application/json' }
     });
   }
   
   const { jsonrpc, method, params, id } = req.body || {};
+  console.log('Method:', method, 'ID:', id);
   
   // Handle initialize request
   if (method === 'initialize') {
