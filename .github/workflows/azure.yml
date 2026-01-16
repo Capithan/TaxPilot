@@ -34,8 +34,11 @@ jobs:
         USERNAME=$(echo "$PUBLISH_PROFILE" | grep -oP 'userName="\K[^"]+' | head -1)
         PASSWORD=$(echo "$PUBLISH_PROFILE" | grep -oP 'userPWD="\K[^"]+' | head -1)
         
+        # Install production dependencies for deployment
+        npm ci --production
+        
         # Create zip excluding unnecessary files
-        zip -r deploy.zip . -x "*.git*" -x "node_modules/*" -x "src/*" -x ".github/*"
+        zip -r deploy.zip . -x "*.git*" -x "src/*" -x ".github/*" -x "*.ts" -x "test-sse.js"
         
         # Deploy via Kudu API
         curl -X POST \
