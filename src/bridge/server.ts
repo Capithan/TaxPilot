@@ -363,6 +363,28 @@ app.post('/sse', (req: Request, res: Response) => {
     return;
   }
   
+  // Handle resources/list - return empty (we don't have resources)
+  if (method === 'resources/list') {
+    res.setHeader('Content-Type', 'application/json');
+    res.json({
+      jsonrpc: '2.0',
+      id,
+      result: { resources: [] }
+    });
+    return;
+  }
+  
+  // Handle prompts/list - return empty (we don't have prompts)
+  if (method === 'prompts/list') {
+    res.setHeader('Content-Type', 'application/json');
+    res.json({
+      jsonrpc: '2.0',
+      id,
+      result: { prompts: [] }
+    });
+    return;
+  }
+  
   // Handle ping
   if (method === 'ping') {
     res.setHeader('Content-Type', 'application/json');
@@ -370,9 +392,9 @@ app.post('/sse', (req: Request, res: Response) => {
     return;
   }
   
-  // Unknown method
+  // Unknown method - return proper JSON-RPC error (not HTTP 400)
   res.setHeader('Content-Type', 'application/json');
-  res.status(400).json({
+  res.json({
     jsonrpc: '2.0',
     id,
     error: { code: -32601, message: `Method not found: ${method}` }
