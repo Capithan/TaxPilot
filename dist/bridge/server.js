@@ -20,10 +20,14 @@ app.use(cors({
     origin: true,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Mcp-Session-Id', 'MCP-Protocol-Version'],
+    exposedHeaders: ['Mcp-Session-Id'],
 }));
-app.use(express.json());
+// Handle preflight OPTIONS requests
+app.options('*', cors());
+app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+app.use(express.text({ type: 'text/plain' }));
 app.use(express.static('public'));
 // ChatGPT Plugin manifest
 app.get('/.well-known/ai-plugin.json', (_req, res) => {
@@ -225,7 +229,19 @@ function handleToolCall(name, args) {
 // This implements the 2025-03-26 spec that ChatGPT uses
 // POST handler for Streamable HTTP - receives JSON-RPC requests
 app.post('/sse', (req, res) => {
-    console.log('MCP POST request received:', req.body?.method);
+    console.log('MCP POST request received');
+    console.log('Headers:', JSON.stringify(req.headers));
+    console.log('Body:', JSON.stringify(req.body));
+    // If body is empty or not JSON, return error with details
+    if (!req.body || Object.keys(req.body).length === 0) {
+        console.log('Empty body received');
+        res.setHeader('Content-Type', 'application/json');
+        return res.status(400).json({
+            jsonrpc: '2.0',
+            id: null,
+            error: { code: -32700, message: 'Parse error: Empty request body' }
+        });
+    }
     const { jsonrpc, method, params, id } = req.body || {};
     // Handle initialize request
     if (method === 'initialize') {
