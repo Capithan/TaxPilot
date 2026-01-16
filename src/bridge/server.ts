@@ -418,11 +418,35 @@ app.get('/', (_req: Request, res: Response) => {
 // Export app for external use (e.g., Azure)
 export default app;
 
+// Self-ping to keep Azure Free tier warm
+function startSelfPing(port: number | string) {
+  const pingInterval = 4 * 60 * 1000; // 4 minutes
+  const host = process.env.WEBSITE_HOSTNAME || `localhost:${port}`;
+  const protocol = process.env.WEBSITE_HOSTNAME ? 'https' : 'http';
+  const pingUrl = `${protocol}://${host}/health`;
+  
+  setInterval(async () => {
+    try {
+      const response = await fetch(pingUrl);
+      console.log(`[Self-ping] ${new Date().toISOString()} - Status: ${response.status}`);
+    } catch (error) {
+      console.log(`[Self-ping] ${new Date().toISOString()} - Error (expected on localhost)`);
+    }
+  }, pingInterval);
+  
+  console.log(`[Self-ping] Enabled - pinging ${pingUrl} every 4 minutes`);
+}
+
 // Only start server if running directly (not imported)
 const isMainModule = import.meta.url === `file://${process.argv[1].replace(/\\/g, '/')}`;
 if (isMainModule) {
   const PORT = process.env.PORT || 3001;
   app.listen(PORT, () => {
     console.log(`Tax Intake MCP Server running on http://localhost:${PORT}`);
+    
+    // Start self-ping on Azure to prevent cold starts
+    if (process.env.WEBSITE_HOSTNAME) {
+      startSelfPing(PORT);
+    }
   });
 }
