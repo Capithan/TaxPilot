@@ -274,20 +274,26 @@ function handleToolCall(name: string, args: Record<string, unknown>): { content:
 app.get('/sse', (req: Request, res: Response) => {
   console.log('SSE connection requested');
   
+  // Disable request timeout for SSE
+  req.setTimeout(0);
+  res.setTimeout(0);
+  
   // Set SSE headers
   res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
+  res.setHeader('Access-Control-Allow-Origin', '*');
   res.flushHeaders();
   
   // Generate session ID using crypto
   const sessionId = crypto.randomUUID();
+  const messagesUrl = `https://${req.get('host')}/messages?sessionId=${sessionId}`;
   sseSessions.set(sessionId, res);
   
-  // Send endpoint event (MCP protocol)
+  // Send endpoint event (MCP protocol) - use full URL for ChatGPT
   res.write(`event: endpoint\n`);
-  res.write(`data: /messages?sessionId=${sessionId}\n\n`);
+  res.write(`data: ${messagesUrl}\n\n`);
   
   // Send server info
   const serverInfo = {
@@ -301,12 +307,14 @@ app.get('/sse', (req: Request, res: Response) => {
   res.write(`event: message\n`);
   res.write(`data: ${JSON.stringify(serverInfo)}\n\n`);
   
-  // Keep-alive ping
+  // Keep-alive ping every 10 seconds (more frequent for ChatGPT)
   const pingInterval = setInterval(() => {
     if (!res.writableEnded) {
-      res.write(`:ping\n\n`);
+      res.write(`:ping ${Date.now()}\n\n`);
+    } else {
+      clearInterval(pingInterval);
     }
-  }, 25000);
+  }, 10000);
   
   // Cleanup on close
   req.on('close', () => {
@@ -315,7 +323,12 @@ app.get('/sse', (req: Request, res: Response) => {
     console.log(`SSE session ${sessionId} closed`);
   });
   
-  console.log(`SSE session ${sessionId} established`);
+  res.on('error', () => {
+    clearInterval(pingInterval);
+    sseSessions.delete(sessionId);
+  });
+  
+  console.log(`SSE session ${sessionId} established, messages URL: ${messagesUrl}`);
 });
 
 // MCP Messages endpoint - receives JSON-RPC requests
