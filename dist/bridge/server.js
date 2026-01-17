@@ -6,7 +6,7 @@ import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { startIntakeSession, processIntakeResponse, getIntakeProgress, getIntakeSummary, } from '../services/intake.js';
 import { generateDocumentChecklist, getDocumentChecklist, markDocumentCollected, getPendingDocuments, formatChecklistForDisplay, } from '../services/checklist.js';
-import { createDocumentReminder, getClientReminders, sendReminder, formatRemindersForDisplay, } from '../services/reminders.js';
+import { createDocumentReminder, createBatchDocumentReminder, getClientReminders, sendReminder, formatRemindersForDisplay, } from '../services/reminders.js';
 import { routeClientToTaxPro, createAppointment, getAppointmentEstimate, getTaxProRecommendations, } from '../services/routing.js';
 import { db } from '../database/index.js';
 // Get __dirname in ESM
@@ -180,14 +180,21 @@ app.get('/tax-pros', (_req, res) => {
 });
 // Define available MCP tools
 const mcpTools = [
-    { name: 'start_intake', description: 'Start a new client intake session', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } } } },
+    { name: 'start_intake', description: 'Start a new client intake session', inputSchema: { type: 'object', properties: { clientId: { type: 'string', description: 'Optional existing client ID' } } } },
     { name: 'process_intake_response', description: 'Process client response during intake', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, answer: { type: 'string' } }, required: ['sessionId', 'answer'] } },
     { name: 'get_intake_progress', description: 'Get intake session progress', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
     { name: 'get_client_summary', description: 'Get complete client summary', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'] } },
     { name: 'generate_document_checklist', description: 'Generate personalized document checklist', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'] } },
     { name: 'get_pending_documents', description: 'Get pending documents list', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'] } },
     { name: 'route_to_tax_pro', description: 'Route client to appropriate tax professional', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'] } },
-    { name: 'get_appointment_estimate', description: 'Estimate appointment duration', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'] } },
+    { name: 'get_appointment_estimate', description: 'Estimate appointment duration based on client complexity', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'] } },
+    { name: 'create_appointment', description: 'Create and book an appointment for a client with a tax professional', inputSchema: { type: 'object', properties: { clientId: { type: 'string', description: 'Client ID' }, taxProId: { type: 'string', description: 'Tax professional ID (from route_to_tax_pro)' }, scheduledAt: { type: 'string', description: 'Appointment time in ISO format (e.g., 2026-01-20T10:00:00)' }, type: { type: 'string', enum: ['virtual', 'in_person'], description: 'Appointment type (default: virtual)' } }, required: ['clientId', 'taxProId', 'scheduledAt'] } },
+    { name: 'create_reminder', description: 'Create reminders for a client about all pending documents', inputSchema: { type: 'object', properties: { clientId: { type: 'string' }, appointmentId: { type: 'string', description: 'Optional appointment ID to link reminders to' } }, required: ['clientId'] } },
+    { name: 'send_reminder', description: 'Send a reminder notification to a client', inputSchema: { type: 'object', properties: { reminderId: { type: 'string' } }, required: ['reminderId'] } },
+    { name: 'get_client_reminders', description: 'Get all reminders for a client', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'] } },
+    { name: 'send_client_notification', description: 'Send a custom notification/email to a client', inputSchema: { type: 'object', properties: { clientId: { type: 'string' }, subject: { type: 'string' }, message: { type: 'string' }, notificationType: { type: 'string', enum: ['email', 'sms'], description: 'Notification channel' } }, required: ['clientId', 'subject', 'message'] } },
+    { name: 'mark_document_collected', description: 'Mark a document as collected/received from client', inputSchema: { type: 'object', properties: { clientId: { type: 'string' }, documentId: { type: 'string' } }, required: ['clientId', 'documentId'] } },
+    { name: 'get_tax_pro_recommendations', description: 'Get list of recommended tax professionals for a client', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'] } },
 ];
 // Handle MCP tool calls
 function handleToolCall(name, args) {
@@ -227,6 +234,48 @@ function handleToolCall(name, args) {
             case 'get_appointment_estimate': {
                 const estimate = getAppointmentEstimate(args.clientId);
                 return { content: [{ type: 'text', text: estimate.message }] };
+            }
+            case 'create_appointment': {
+                const appointment = createAppointment(args.clientId, args.taxProId, new Date(args.scheduledAt), args.type || 'virtual');
+                return { content: [{ type: 'text', text: `✅ Appointment booked!\n\nAppointment ID: ${appointment.id}\nScheduled: ${appointment.scheduledAt.toISOString()}\nTax Professional: ${appointment.taxProId}\nDuration: ${appointment.duration} minutes\nStatus: ${appointment.status}` }] };
+            }
+            case 'create_reminder': {
+                // Use batch reminder which creates a reminder for all pending documents
+                const reminder = createBatchDocumentReminder(args.clientId, args.appointmentId || 'pending');
+                if (!reminder) {
+                    return { content: [{ type: 'text', text: '📋 No pending documents found for this client - no reminder needed!' }] };
+                }
+                return { content: [{ type: 'text', text: `✅ Reminder created!\n\nReminder ID: ${reminder.id}\nType: ${reminder.type}\nScheduled for: ${reminder.scheduledFor}\nChannel: ${reminder.channel}\nDocuments: ${reminder.documentIds?.length || 0} pending` }] };
+            }
+            case 'send_reminder': {
+                const result = sendReminder(args.reminderId);
+                return { content: [{ type: 'text', text: result.success ? `✅ ${result.message}` : `❌ ${result.message}` }] };
+            }
+            case 'get_client_reminders': {
+                const reminders = getClientReminders(args.clientId);
+                return { content: [{ type: 'text', text: formatRemindersForDisplay(reminders) }] };
+            }
+            case 'send_client_notification': {
+                // Simulate sending notification (in production, this would integrate with email/SMS service)
+                const notificationId = crypto.randomUUID();
+                const notification = {
+                    id: notificationId,
+                    clientId: args.clientId,
+                    subject: args.subject,
+                    message: args.message,
+                    type: args.notificationType || 'email',
+                    sentAt: new Date().toISOString(),
+                    status: 'sent'
+                };
+                return { content: [{ type: 'text', text: `✅ Notification sent!\n\nNotification ID: ${notification.id}\nTo: Client ${notification.clientId}\nSubject: ${notification.subject}\nType: ${notification.type}\nSent at: ${notification.sentAt}\n\nMessage:\n${notification.message}` }] };
+            }
+            case 'mark_document_collected': {
+                const result = markDocumentCollected(args.clientId, args.documentId);
+                return { content: [{ type: 'text', text: `✅ Document marked as collected!\n\nDocument ID: ${args.documentId}\nClient: ${args.clientId}\nStatus: Collected` }] };
+            }
+            case 'get_tax_pro_recommendations': {
+                const recommendations = getTaxProRecommendations(args.clientId);
+                return { content: [{ type: 'text', text: recommendations }] };
             }
             default:
                 return { content: [{ type: 'text', text: `Unknown tool: ${name}` }] };
