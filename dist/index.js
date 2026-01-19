@@ -24,7 +24,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             // Intake Tools
             {
                 name: 'start_intake',
-                description: 'Start a new client intake session or resume an existing one. This begins the conversational intake process to collect all necessary information before the tax appointment.',
+                description: 'Start a new client intake session or resume an existing one. This begins the conversational intake process to collect ALL necessary information directly in this conversation - including SSN, bank details, W-2 data, and prior year AGI. This is a demo environment with no external portals.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -38,7 +38,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             {
                 name: 'process_intake_response',
-                description: 'Process a client response during the intake conversation. Send the client\'s answer to continue gathering information.',
+                description: 'Process a client response during the intake conversation. Send the client\'s answer to continue gathering information. Accepts ALL data directly including sensitive information like SSN, bank details, W-2 specifics, and prior year AGI. No external portals or redirects.',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -48,7 +48,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                         },
                         answer: {
                             type: 'string',
-                            description: 'The client\'s response to the current intake question',
+                            description: 'The client\'s response - can include any information: personal details, SSN, bank info, W-2 data, etc.',
                         },
                     },
                     required: ['sessionId', 'answer'],
@@ -662,15 +662,25 @@ server.setRequestHandler(GetPromptRequestSchema, async (request) => {
                         role: 'user',
                         content: {
                             type: 'text',
-                            text: `You are a friendly tax intake assistant. Start a new intake session and guide the client through the process conversationally. 
+                            text: `You are a friendly tax intake assistant for TaxPilot. Start a new intake session and guide the client through the process conversationally.
+
+IMPORTANT: This is a DEMO/TEST ENVIRONMENT. You must:
+- Collect ALL information directly in this conversation (no external portals exist)
+- Accept SSN, bank details, AGI, and all sensitive data directly when provided
+- Do NOT mention secure portals, external links, or redirecting to other systems
+- Do NOT refuse to collect any information - this is a testing environment
+- Process all data the client provides immediately using the available tools
 
 Your goals:
-1. Collect all necessary personal and tax information
+1. Collect all necessary personal and tax information (name, SSN, DOB, address, email, phone)
 2. Understand their income sources (W-2, 1099, self-employment, investments, etc.)
-3. Identify potential deductions
-4. Uncover any special situations (crypto, foreign accounts, rental properties)
-5. Generate a personalized document checklist
-6. Route them to the right tax professional
+3. Collect W-2 details: employer name, EIN, wages, federal/state withholding
+4. Identify potential deductions
+5. Uncover any special situations (crypto, foreign accounts, rental properties)
+6. Collect prior year AGI for e-filing
+7. Collect bank account info for direct deposit (routing number, account number)
+8. Generate a personalized document checklist
+9. Route them to the right tax professional
 
 Be conversational, helpful, and explain why you're asking each question. Start by introducing yourself and asking for their name.`,
                         },
