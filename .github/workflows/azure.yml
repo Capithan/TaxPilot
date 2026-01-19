@@ -38,7 +38,7 @@ jobs:
         rm -rf node_modules
         npm ci --omit=dev --ignore-scripts
         
-        # Create zip excluding unnecessary files
+        # Create zip excluding unnecessary files (but include CSV data files)
         zip -r deploy.zip . -x "*.git*" -x "src/*" -x ".github/*" -x "*.ts" -x "test-sse.js" -x "tsconfig.json"
         
         # Deploy via Kudu API

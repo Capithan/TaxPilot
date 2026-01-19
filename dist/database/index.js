@@ -1,3 +1,4 @@
+import { loadTaxProsFromCSV } from '../services/taxproLoader.js';
 // In-memory database for demo purposes
 // In production, replace with actual database (PostgreSQL, MongoDB, etc.)
 class Database {
@@ -11,64 +12,40 @@ class Database {
         this.initializeTaxPros();
     }
     initializeTaxPros() {
-        const taxPros = [
-            {
-                id: 'tp-001',
-                name: 'Sarah Johnson',
-                email: 'sarah.johnson@taxfirm.com',
-                specializations: ['individual', 'self_employment'],
-                maxComplexity: 'moderate',
-                currentLoad: 3,
-                maxDailyAppointments: 8,
-                available: true,
-                rating: 4.8,
-            },
-            {
-                id: 'tp-002',
-                name: 'Michael Chen',
-                email: 'michael.chen@taxfirm.com',
-                specializations: ['investments', 'crypto', 'foreign_income'],
-                maxComplexity: 'expert',
-                currentLoad: 5,
-                maxDailyAppointments: 6,
-                available: true,
-                rating: 4.9,
-            },
-            {
-                id: 'tp-003',
-                name: 'Emily Rodriguez',
-                email: 'emily.rodriguez@taxfirm.com',
-                specializations: ['small_business', 'self_employment', 'real_estate'],
-                maxComplexity: 'complex',
-                currentLoad: 4,
-                maxDailyAppointments: 7,
-                available: true,
-                rating: 4.7,
-            },
-            {
-                id: 'tp-004',
-                name: 'James Wilson',
-                email: 'james.wilson@taxfirm.com',
-                specializations: ['individual'],
-                maxComplexity: 'simple',
-                currentLoad: 6,
-                maxDailyAppointments: 12,
-                available: true,
-                rating: 4.5,
-            },
-            {
-                id: 'tp-005',
-                name: 'Dr. Patricia Martinez',
-                email: 'patricia.martinez@taxfirm.com',
-                specializations: ['estate_planning', 'foreign_income', 'audit_representation'],
-                maxComplexity: 'expert',
-                currentLoad: 2,
-                maxDailyAppointments: 4,
-                available: true,
-                rating: 5.0,
-            },
-        ];
-        taxPros.forEach((tp) => this.taxPros.set(tp.id, tp));
+        // Load tax professionals from CSV file
+        const taxPros = loadTaxProsFromCSV();
+        if (taxPros.length > 0) {
+            taxPros.forEach((tp) => this.taxPros.set(tp.id, tp));
+        }
+        else {
+            // Fallback to hardcoded defaults if CSV not found
+            console.warn('No tax pros loaded from CSV, using fallback defaults');
+            const fallbackPros = [
+                {
+                    id: 'tp-001',
+                    name: 'Sarah Johnson',
+                    email: 'sarah.johnson@taxfirm.com',
+                    specializations: ['individual', 'self_employment'],
+                    maxComplexity: 'moderate',
+                    currentLoad: 3,
+                    maxDailyAppointments: 8,
+                    available: true,
+                    rating: 4.8,
+                },
+                {
+                    id: 'tp-002',
+                    name: 'Michael Chen',
+                    email: 'michael.chen@taxfirm.com',
+                    specializations: ['investments', 'crypto', 'foreign_income'],
+                    maxComplexity: 'expert',
+                    currentLoad: 5,
+                    maxDailyAppointments: 6,
+                    available: true,
+                    rating: 4.9,
+                },
+            ];
+            fallbackPros.forEach((tp) => this.taxPros.set(tp.id, tp));
+        }
     }
     // Client operations
     createClient(client) {

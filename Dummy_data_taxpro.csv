@@ -1,0 +1,51 @@
+﻿tax_pro_id,first_name,last_name,email,phone,years_experience,specializations,complexity_level_min,complexity_level_max,rating,appointments_per_day,is_active
+TP001,Michael,Chen,michael.chen@taxpilot.com,555-1001,12,"Cryptocurrency,Investments",40,100,4.9,6,TRUE
+TP002,Sarah,Johnson,sarah.johnson@taxpilot.com,555-1002,8,Individual Returns,0,30,4.6,10,TRUE
+TP003,David,Martinez,david.martinez@taxpilot.com,555-1003,15,"Small Business,Self-Employment",30,80,4.8,7,TRUE
+TP004,Emily,Nguyen,emily.nguyen@taxpilot.com,555-1004,6,Individual Returns,0,25,4.4,12,TRUE
+TP005,Robert,Stevens,robert.stevens@taxpilot.com,555-1005,20,"Real Estate,Investments",40,90,4.9,5,TRUE
+TP006,Linda,Garcia,linda.garcia@taxpilot.com,555-1006,10,Self-Employment,25,60,4.7,8,TRUE
+TP007,James,Williams,james.williams@taxpilot.com,555-1007,18,Audit Representation,60,100,4.8,4,TRUE
+TP008,Amanda,Brown,amanda.brown@taxpilot.com,555-1008,5,Individual Returns,0,20,4.3,12,TRUE
+TP009,Daniel,Kim,daniel.kim@taxpilot.com,555-1009,9,Cryptocurrency,30,85,4.6,7,TRUE
+TP010,Patricia,Lopez,patricia.lopez@taxpilot.com,555-1010,14,Foreign Income,50,100,4.9,5,TRUE
+TP011,Andrew,Wilson,andrew.wilson@taxpilot.com,555-1011,7,Investments,20,60,4.5,9,TRUE
+TP012,Natalie,Patel,natalie.patel@taxpilot.com,555-1012,11,Small Business,35,75,4.7,7,TRUE
+TP013,Christopher,Moore,christopher.moore@taxpilot.com,555-1013,16,Real Estate,40,85,4.8,6,TRUE
+TP014,Jessica,Taylor,jessica.taylor@taxpilot.com,555-1014,4,Individual Returns,0,15,4.2,14,TRUE
+TP015,Kevin,Anderson,kevin.anderson@taxpilot.com,555-1015,13,"Self-Employment,Small Business",30,80,4.7,7,TRUE
+TP016,Rachel,Thomas,rachel.thomas@taxpilot.com,555-1016,9,Investments,25,55,4.5,8,TRUE
+TP017,Mark,Hernandez,mark.hernandez@taxpilot.com,555-1017,17,"Audit Representation,Foreign Income",60,100,4.9,4,TRUE
+TP018,Olivia,Martin,olivia.martin@taxpilot.com,555-1018,6,Individual Returns,0,25,4.4,11,TRUE
+TP019,Jason,Lee,jason.lee@taxpilot.com,555-1019,12,"Cryptocurrency,Self-Employment",35,90,4.8,6,TRUE
+TP020,Sophia,Clark,sophia.clark@taxpilot.com,555-1020,8,Individual Returns,0,30,4.5,10,TRUE
+TP021,Thomas,Walker,thomas.walker@taxpilot.com,555-1021,19,Estate Planning,50,100,4.9,4,TRUE
+TP022,Isabella,Hall,isabella.hall@taxpilot.com,555-1022,7,Investments,20,50,4.4,9,TRUE
+TP023,Brian,Young,brian.young@taxpilot.com,555-1023,10,Small Business,30,70,4.6,8,TRUE
+TP024,Megan,King,megan.king@taxpilot.com,555-1024,5,Individual Returns,0,20,4.3,13,TRUE
+TP025,Eric,Wright,eric.wright@taxpilot.com,555-1025,14,"Real Estate,Foreign Income",45,95,4.8,5,TRUE
+TP026,Laura,Scott,laura.scott@taxpilot.com,555-1026,9,Self-Employment,25,60,4.6,8,TRUE
+TP027,Steven,Green,steven.green@taxpilot.com,555-1027,21,Audit Representation,70,100,4.9,3,TRUE
+TP028,Hannah,Adams,hannah.adams@taxpilot.com,555-1028,6,Individual Returns,0,25,4.4,11,TRUE
+TP029,Paul,Baker,paul.baker@taxpilot.com,555-1029,11,Cryptocurrency,35,85,4.7,6,TRUE
+TP030,Chloe,Nelson,chloe.nelson@taxpilot.com,555-1030,8,Investments,20,55,4.5,9,TRUE
+TP031,Victor,Ramirez,victor.ramirez@taxpilot.com,555-1031,16,"Small Business,Real Estate",40,90,4.8,6,TRUE
+TP032,Avery,Carter,avery.carter@taxpilot.com,555-1032,5,Individual Returns,0,20,4.3,13,TRUE
+TP033,Jonathan,Mitchell,jonathan.mitchell@taxpilot.com,555-1033,18,Foreign Income,60,100,4.9,4,TRUE
+TP034,Grace,Perez,grace.perez@taxpilot.com,555-1034,7,Self-Employment,25,55,4.5,9,TRUE
+TP035,Henry,Roberts,henry.roberts@taxpilot.com,555-1035,20,"Estate Planning,Investments",50,100,4.9,4,TRUE
+TP036,Leah,Turner,leah.turner@taxpilot.com,555-1036,6,Individual Returns,0,25,4.4,11,TRUE
+TP037,Alex,Phillips,alex.phillips@taxpilot.com,555-1037,13,Small Business,30,75,4.7,7,TRUE
+TP038,Mia,Campbell,mia.campbell@taxpilot.com,555-1038,9,Investments,20,50,4.5,9,TRUE
+TP039,Noah,Parker,noah.parker@taxpilot.com,555-1039,15,Real Estate,40,85,4.8,6,TRUE
+TP040,Ella,Evans,ella.evans@taxpilot.com,555-1040,5,Individual Returns,0,20,4.3,14,TRUE
+TP041,Oscar,Edwards,oscar.edwards@taxpilot.com,555-1041,17,Audit Representation,65,100,4.9,4,TRUE
+TP042,Lily,Collins,lily.collins@taxpilot.com,555-1042,8,Self-Employment,25,55,4.5,9,TRUE
+TP043,Samuel,Reed,samuel.reed@taxpilot.com,555-1043,14,"Cryptocurrency,Investments",40,90,4.8,6,TRUE
+TP044,Nora,Cook,nora.cook@taxpilot.com,555-1044,6,Individual Returns,0,25,4.4,11,TRUE
+TP045,Justin,Morgan,justin.morgan@taxpilot.com,555-1045,19,"Foreign Income,Audit Representation",70,100,4.9,4,TRUE
+TP046,Kayla,Bell,kayla.bell@taxpilot.com,555-1046,7,Investments,20,50,4.5,9,TRUE
+TP047,Ryan,Murphy,ryan.murphy@taxpilot.com,555-1047,12,Small Business,30,75,4.6,8,TRUE
+TP048,Anna,Bailey,anna.bailey@taxpilot.com,555-1048,5,Individual Returns,0,20,4.3,13,TRUE
+TP049,Peter,Rivera,peter.rivera@taxpilot.com,555-1049,16,"Real Estate,Self-Employment",40,85,4.8,6,TRUE
+TP050,Zoe,Cooper,zoe.cooper@taxpilot.com,555-1050,10,Cryptocurrency,35,80,4.7,7,TRUE
