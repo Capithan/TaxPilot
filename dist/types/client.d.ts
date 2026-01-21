@@ -132,4 +132,44 @@ export interface IntakeResponse {
     answer: string | boolean | number | string[];
     timestamp: Date;
 }
+/**
+ * Defines the stages of the TaxPilot conversation flow.
+ * Every conversation follows this sequence in order.
+ */
+export type ConversationStage = 'welcome' | 'intake_questions' | 'summary_review' | 'summary_confirmation' | 'document_checklist' | 'availability_inquiry' | 'taxpro_routing' | 'appointment_scheduling' | 'reminders_setup' | 'complete';
+/**
+ * Tracks the current state of the conversation flow.
+ */
+export interface ConversationFlowState {
+    clientId: string;
+    sessionId: string;
+    currentStage: ConversationStage;
+    completedStages: ConversationStage[];
+    stageData: Record<ConversationStage, unknown>;
+    startedAt: Date;
+    lastActivityAt: Date;
+    summaryConfirmed: boolean;
+    selectedTaxProId?: string;
+    preferredSchedule?: {
+        preferredDates: string[];
+        preferredTimes: string[];
+        appointmentType: 'virtual' | 'in_person';
+    };
+}
+/**
+ * The result of checking or advancing the flow.
+ */
+export interface FlowActionResult {
+    currentStage: ConversationStage;
+    nextAction: string;
+    instructions: string;
+    canProceed: boolean;
+    blockers?: string[];
+    suggestedTools?: string[];
+    progress: {
+        current: number;
+        total: number;
+        percentage: number;
+    };
+}
 //# sourceMappingURL=client.d.ts.map

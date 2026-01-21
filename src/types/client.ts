@@ -229,3 +229,60 @@ export interface IntakeResponse {
   answer: string | boolean | number | string[];
   timestamp: Date;
 }
+
+// ============================================
+// CONVERSATION FLOW MANAGEMENT TYPES
+// ============================================
+
+/**
+ * Defines the stages of the TaxPilot conversation flow.
+ * Every conversation follows this sequence in order.
+ */
+export type ConversationStage =
+  | 'welcome'                    // Initial greeting and start intake
+  | 'intake_questions'           // Collecting all intake information
+  | 'summary_review'             // Show summary and ask for confirmation
+  | 'summary_confirmation'       // Wait for user to confirm or request edits
+  | 'document_checklist'         // Generate and display document checklist
+  | 'availability_inquiry'       // Ask about scheduling preferences
+  | 'taxpro_routing'             // Route to appropriate tax professional
+  | 'appointment_scheduling'     // Create the appointment
+  | 'reminders_setup'            // Set up document and appointment reminders
+  | 'complete';                  // Flow is complete
+
+/**
+ * Tracks the current state of the conversation flow.
+ */
+export interface ConversationFlowState {
+  clientId: string;
+  sessionId: string;
+  currentStage: ConversationStage;
+  completedStages: ConversationStage[];
+  stageData: Record<ConversationStage, unknown>;
+  startedAt: Date;
+  lastActivityAt: Date;
+  summaryConfirmed: boolean;
+  selectedTaxProId?: string;
+  preferredSchedule?: {
+    preferredDates: string[];
+    preferredTimes: string[];
+    appointmentType: 'virtual' | 'in_person';
+  };
+}
+
+/**
+ * The result of checking or advancing the flow.
+ */
+export interface FlowActionResult {
+  currentStage: ConversationStage;
+  nextAction: string;
+  instructions: string;
+  canProceed: boolean;
+  blockers?: string[];
+  suggestedTools?: string[];
+  progress: {
+    current: number;
+    total: number;
+    percentage: number;
+  };
+}

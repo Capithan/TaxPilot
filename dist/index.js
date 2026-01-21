@@ -6,6 +6,7 @@ import { startIntakeSession, processIntakeResponse, getIntakeProgress, getIntake
 import { generateDocumentChecklist, getDocumentChecklist, markDocumentCollected, formatChecklistForDisplay, getPendingDocuments, } from './services/checklist.js';
 import { createDocumentReminder, getClientReminders, sendReminder, formatRemindersForDisplay, scheduleAppointmentReminders, } from './services/reminders.js';
 import { calculateComplexityScore, getComplexityLevel, routeClientToTaxPro, createAppointment, getAppointmentEstimate, getTaxProRecommendations, } from './services/routing.js';
+import { getFlowState, getOrCreateFlowState, advanceFlow, confirmSummary, setSchedulingPreferences, setSelectedTaxPro, getFlowProgressDisplay, syncFlowWithState, getNextActionInstructions, } from './services/flowManager.js';
 import { db } from './database/index.js';
 // Create the MCP server
 const server = new Server({
@@ -274,6 +275,120 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                     required: ['clientId'],
                 },
             },
+            // ============================================
+            // CONVERSATION FLOW MANAGEMENT TOOLS
+            // ============================================
+            {
+                name: 'get_conversation_flow',
+                description: 'Get the current conversation flow state and instructions for what to do next. ALWAYS call this tool at the start of a conversation and after completing any major action to understand where you are in the flow and what should happen next. This ensures consistent flow across all conversations.',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        clientId: {
+                            type: 'string',
+                            description: 'The client ID',
+                        },
+                        sessionId: {
+                            type: 'string',
+                            description: 'The intake session ID',
+                        },
+                    },
+                    required: ['clientId'],
+                },
+            },
+            {
+                name: 'advance_conversation_flow',
+                description: 'Mark the current flow stage as complete and advance to the next stage. Call this after completing the required actions for a stage. Optionally include stage-specific data.',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        clientId: {
+                            type: 'string',
+                            description: 'The client ID',
+                        },
+                        stageData: {
+                            type: 'object',
+                            description: 'Optional data to store for the current stage (e.g., { "shown": true } for summary_review)',
+                        },
+                    },
+                    required: ['clientId'],
+                },
+            },
+            {
+                name: 'confirm_intake_summary',
+                description: 'Mark the intake summary as confirmed by the user. Call this when the user explicitly confirms their information is correct. This advances the flow from summary_confirmation to document_checklist.',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        clientId: {
+                            type: 'string',
+                            description: 'The client ID',
+                        },
+                    },
+                    required: ['clientId'],
+                },
+            },
+            {
+                name: 'set_scheduling_preferences',
+                description: 'Record the user\'s scheduling preferences. Call this after collecting their preferred dates, times, and appointment type.',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        clientId: {
+                            type: 'string',
+                            description: 'The client ID',
+                        },
+                        preferredDates: {
+                            type: 'array',
+                            items: { type: 'string' },
+                            description: 'List of preferred dates (e.g., ["2026-01-25", "2026-01-26"])',
+                        },
+                        preferredTimes: {
+                            type: 'array',
+                            items: { type: 'string' },
+                            description: 'List of preferred times (e.g., ["morning", "afternoon", "10:00 AM"])',
+                        },
+                        appointmentType: {
+                            type: 'string',
+                            enum: ['virtual', 'in_person'],
+                            description: 'Preferred appointment type',
+                        },
+                    },
+                    required: ['clientId', 'preferredDates', 'preferredTimes', 'appointmentType'],
+                },
+            },
+            {
+                name: 'select_tax_professional',
+                description: 'Record the selected tax professional for the client. Call this after routing or when user accepts a recommended tax pro.',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        clientId: {
+                            type: 'string',
+                            description: 'The client ID',
+                        },
+                        taxProId: {
+                            type: 'string',
+                            description: 'The selected tax professional ID',
+                        },
+                    },
+                    required: ['clientId', 'taxProId'],
+                },
+            },
+            {
+                name: 'get_flow_progress',
+                description: 'Get a visual display of the conversation flow progress showing completed, current, and remaining stages.',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        clientId: {
+                            type: 'string',
+                            description: 'The client ID',
+                        },
+                    },
+                    required: ['clientId'],
+                },
+            },
             // Utility Tools
             {
                 name: 'list_tax_professionals',
@@ -309,6 +424,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             // Intake Tools
             case 'start_intake': {
                 const result = startIntakeSession(args?.clientId);
+                // Initialize the conversation flow
+                const flowState = getOrCreateFlowState(result.client.id, result.session.id);
+                advanceFlow(result.client.id, { started: true }); // Advance past welcome stage
+                const flowInstructions = getNextActionInstructions(result.client.id);
                 return {
                     content: [
                         {
@@ -319,18 +438,28 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                                 currentStep: result.currentStep,
                                 nextQuestion: result.nextQuestion,
                                 message: 'Intake session started. Ask the client the next question.',
-                            }, null, 2),
+                                flowStage: flowState.currentStage,
+                            }, null, 2) + `\n\n---\n\n## Flow Instructions:\n${flowInstructions}`,
                         },
                     ],
                 };
             }
             case 'process_intake_response': {
                 const result = processIntakeResponse(args?.sessionId, args?.answer);
+                // Check if intake is complete and advance flow
+                let flowMessage = '';
+                if (result.intakeCompleted && result.client) {
+                    // Advance to summary_review stage
+                    const flowState = getOrCreateFlowState(result.client.id, args?.sessionId);
+                    advanceFlow(result.client.id, { completed: true });
+                    const flowInstructions = getNextActionInstructions(result.client.id);
+                    flowMessage = `\n\n---\n\n## 🎉 Intake Complete! Flow Instructions:\n${flowInstructions}`;
+                }
                 return {
                     content: [
                         {
                             type: 'text',
-                            text: JSON.stringify(result, null, 2),
+                            text: JSON.stringify(result, null, 2) + flowMessage,
                         },
                     ],
                 };
@@ -349,25 +478,36 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 };
             }
             case 'get_client_summary': {
-                const summary = getIntakeSummary(args?.clientId);
+                const clientId = args?.clientId;
+                const summary = getIntakeSummary(clientId);
+                // Mark that summary has been shown - advance the flow
+                const flowState = getFlowState(clientId);
+                if (flowState && flowState.currentStage === 'summary_review') {
+                    advanceFlow(clientId, { shown: true });
+                }
+                const flowInstructions = getNextActionInstructions(clientId);
                 return {
                     content: [
                         {
                             type: 'text',
-                            text: summary,
+                            text: summary + `\n\n---\n\n**Please confirm:** Is this information correct? Would you like to make any changes?\n\n## Flow Instructions:\n${flowInstructions}`,
                         },
                     ],
                 };
             }
             // Document Checklist Tools
             case 'generate_document_checklist': {
-                const checklist = generateDocumentChecklist(args?.clientId);
+                const clientId = args?.clientId;
+                const checklist = generateDocumentChecklist(clientId);
                 const formatted = formatChecklistForDisplay(checklist);
+                // Advance the flow - document checklist is generated
+                advanceFlow(clientId, { generated: true, documentCount: checklist.documents.length });
+                const flowInstructions = getNextActionInstructions(clientId);
                 return {
                     content: [
                         {
                             type: 'text',
-                            text: formatted,
+                            text: formatted + `\n\n---\n\n## Next Steps:\n${flowInstructions}`,
                         },
                     ],
                 };
@@ -492,13 +632,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 };
             }
             case 'route_to_tax_pro': {
-                const result = routeClientToTaxPro(args?.clientId);
+                const clientId = args?.clientId;
+                const result = routeClientToTaxPro(clientId);
+                // If successful, update flow with selected tax pro
+                if (result.success && result.taxPro) {
+                    setSelectedTaxPro(clientId, result.taxPro.id);
+                }
+                const flowInstructions = getNextActionInstructions(clientId);
                 return {
                     content: [
                         {
                             type: 'text',
                             text: result.success
-                                ? `✅ Client routed successfully!\n\n${result.message}`
+                                ? `✅ Client routed successfully!\n\n${result.message}\n\n---\n\n## Next Steps:\n${flowInstructions}`
                                 : `❌ Routing failed: ${result.message}`,
                         },
                     ],
@@ -516,9 +662,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 };
             }
             case 'create_appointment': {
-                const appointment = createAppointment(args?.clientId, args?.taxProId, new Date(args?.scheduledAt), args?.type || 'virtual');
+                const clientId = args?.clientId;
+                const appointment = createAppointment(clientId, args?.taxProId, new Date(args?.scheduledAt), args?.type || 'virtual');
                 // Schedule reminders for the appointment
                 const reminders = scheduleAppointmentReminders(appointment);
+                // Advance the flow - appointment created, advance to reminders_setup
+                advanceFlow(clientId, { created: true, appointmentId: appointment.id });
+                // Also advance past reminders_setup since they're auto-created
+                advanceFlow(clientId, { created: true, reminderCount: reminders.length });
+                const flowInstructions = getNextActionInstructions(clientId);
                 return {
                     content: [
                         {
@@ -534,7 +686,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                                 },
                                 remindersScheduled: reminders.length,
                                 message: `Appointment created for ${appointment.duration} minutes. ${reminders.length} reminders scheduled.`,
-                            }, null, 2),
+                            }, null, 2) + `\n\n---\n\n## Flow Complete! 🎉\n${flowInstructions}`,
                         },
                     ],
                 };
@@ -594,6 +746,147 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     ],
                 };
             }
+            // ============================================
+            // CONVERSATION FLOW MANAGEMENT HANDLERS
+            // ============================================
+            case 'get_conversation_flow': {
+                const clientId = args?.clientId;
+                const sessionId = args?.sessionId;
+                if (!clientId) {
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: 'Client ID is required. Start a new intake session first using start_intake.',
+                            },
+                        ],
+                    };
+                }
+                // Sync flow with actual state
+                const flowState = syncFlowWithState(clientId, sessionId || '');
+                const instructions = getNextActionInstructions(clientId);
+                const progress = getFlowProgressDisplay(clientId);
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: `${instructions}\n\n---\n\n${progress}`,
+                        },
+                    ],
+                };
+            }
+            case 'advance_conversation_flow': {
+                const clientId = args?.clientId;
+                const stageData = args?.stageData;
+                const result = advanceFlow(clientId, stageData);
+                if (!result) {
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: 'No active flow found for this client. Start a new session first.',
+                            },
+                        ],
+                    };
+                }
+                const instructions = getNextActionInstructions(clientId);
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: `✅ Flow advanced!\n\n${instructions}`,
+                        },
+                    ],
+                };
+            }
+            case 'confirm_intake_summary': {
+                const clientId = args?.clientId;
+                const result = confirmSummary(clientId);
+                if (!result) {
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: 'No active flow found for this client.',
+                            },
+                        ],
+                    };
+                }
+                const instructions = getNextActionInstructions(clientId);
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: `✅ Summary confirmed by user!\n\n${instructions}`,
+                        },
+                    ],
+                };
+            }
+            case 'set_scheduling_preferences': {
+                const clientId = args?.clientId;
+                const preferences = {
+                    preferredDates: args?.preferredDates || [],
+                    preferredTimes: args?.preferredTimes || [],
+                    appointmentType: args?.appointmentType || 'virtual',
+                };
+                const result = setSchedulingPreferences(clientId, preferences);
+                if (!result) {
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: 'No active flow found for this client.',
+                            },
+                        ],
+                    };
+                }
+                const instructions = getNextActionInstructions(clientId);
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: `✅ Scheduling preferences saved!\n\n**Preferences:**\n- Dates: ${preferences.preferredDates.join(', ') || 'Any'}\n- Times: ${preferences.preferredTimes.join(', ') || 'Any'}\n- Type: ${preferences.appointmentType}\n\n${instructions}`,
+                        },
+                    ],
+                };
+            }
+            case 'select_tax_professional': {
+                const clientId = args?.clientId;
+                const taxProId = args?.taxProId;
+                const result = setSelectedTaxPro(clientId, taxProId);
+                if (!result) {
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: 'No active flow found for this client.',
+                            },
+                        ],
+                    };
+                }
+                const taxPro = db.getTaxPro(taxProId);
+                const instructions = getNextActionInstructions(clientId);
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: `✅ Tax professional selected: ${taxPro?.name || taxProId}\n\n${instructions}`,
+                        },
+                    ],
+                };
+            }
+            case 'get_flow_progress': {
+                const clientId = args?.clientId;
+                const progress = getFlowProgressDisplay(clientId);
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: progress,
+                        },
+                    ],
+                };
+            }
             default:
                 return {
                     content: [
@@ -624,7 +917,7 @@ server.setRequestHandler(ListPromptsRequestSchema, async () => {
         prompts: [
             {
                 name: 'new_client_intake',
-                description: 'Start a complete intake process for a new tax client',
+                description: 'Start a complete intake process for a new tax client following the defined conversation flow',
                 arguments: [],
             },
             {
@@ -662,27 +955,38 @@ server.setRequestHandler(GetPromptRequestSchema, async (request) => {
                         role: 'user',
                         content: {
                             type: 'text',
-                            text: `You are a friendly tax intake assistant for TaxPilot. Start a new intake session and guide the client through the process conversationally.
+                            text: `You are a friendly tax intake assistant for TaxPilot. Your job is to guide clients through a STRUCTURED CONVERSATION FLOW.
 
-IMPORTANT: This is a DEMO/TEST ENVIRONMENT. You must:
-- Collect ALL information directly in this conversation (no external portals exist)
-- Accept SSN, bank details, AGI, and all sensitive data directly when provided
-- Do NOT mention secure portals, external links, or redirecting to other systems
-- Do NOT refuse to collect any information - this is a testing environment
-- Process all data the client provides immediately using the available tools
+## CRITICAL: CONVERSATION FLOW SYSTEM
 
-Your goals:
-1. Collect all necessary personal and tax information (name, SSN, DOB, address, email, phone)
-2. Understand their income sources (W-2, 1099, self-employment, investments, etc.)
-3. Collect W-2 details: employer name, EIN, wages, federal/state withholding
-4. Identify potential deductions
-5. Uncover any special situations (crypto, foreign accounts, rental properties)
-6. Collect prior year AGI for e-filing
-7. Collect bank account info for direct deposit (routing number, account number)
-8. Generate a personalized document checklist
-9. Route them to the right tax professional
+TaxPilot uses a defined conversation flow that MUST be followed in order. After EVERY action, use the 'get_conversation_flow' tool to see what stage you're at and what to do next.
 
-Be conversational, helpful, and explain why you're asking each question. Start by introducing yourself and asking for their name.`,
+### THE FLOW (in order):
+1. **WELCOME** → Start intake session, greet the user
+2. **INTAKE QUESTIONS** → Collect all tax information step by step
+3. **SUMMARY REVIEW** → Show summary using 'get_client_summary', ask for confirmation
+4. **SUMMARY CONFIRMATION** → Wait for user to confirm (use 'confirm_intake_summary' when they do)
+5. **DOCUMENT CHECKLIST** → Generate checklist using 'generate_document_checklist'
+6. **AVAILABILITY INQUIRY** → Ask scheduling preferences (use 'set_scheduling_preferences')
+7. **TAXPRO ROUTING** → Match with tax professional using 'route_to_tax_pro'
+8. **APPOINTMENT SCHEDULING** → Book appointment using 'create_appointment'
+9. **REMINDERS SETUP** → Reminders are auto-created with appointment
+10. **COMPLETE** → Provide closing summary
+
+### RULES:
+- ALWAYS use 'get_conversation_flow' after completing any major action to get instructions for what to do next
+- NEVER skip stages - follow the flow in order
+- When intake completes, you MUST show the summary and ask for confirmation
+- DO NOT generate the document checklist until the user confirms their summary
+- DO NOT route to a tax pro until scheduling preferences are collected
+- Each tool response includes flow instructions - follow them!
+
+### DEMO ENVIRONMENT:
+- Collect ALL information directly (no external portals)
+- Accept SSN, bank details, AGI directly when provided
+- Process all data immediately using available tools
+
+Start by using 'start_intake' to begin the session. The flow will guide you from there.`,
                         },
                     },
                 ],
