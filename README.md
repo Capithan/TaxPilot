@@ -1,11 +1,12 @@
-# Tax Client Intake & Appointment Optimization MCP Server
+# TaxPilot - Intelligent Tax Client Intake MCP Server
 
-An intelligent MCP (Model Context Protocol) server for tax professionals that streamlines client intake, automates document collection, and optimizes appointment scheduling.
+An intelligent MCP (Model Context Protocol) server for tax professionals that streamlines client intake, automates document collection, and optimizes appointment scheduling with **guided conversation flow management**.
 
 ## 🎯 Problem Solved
 
 **40% of clients arrive unprepared**, wasting valuable tax professional time. This solution provides:
 
+- **Guided conversation flow** - Ensures consistent experience from intake to appointment
 - **Pre-appointment intelligent assistant** - Conversational intake collects all info before appointment
 - **Auto-generated personalized document checklists** - Based on client's specific tax situation
 - **Smart reminders** - "Don't forget your 1099-NEC from Uber"
@@ -15,25 +16,41 @@ An intelligent MCP (Model Context Protocol) server for tax professionals that st
 
 ## 🚀 Features
 
-### 1. Conversational Intake
+### 1. Conversation Flow Management
+The system maintains a consistent 10-stage conversation flow:
+
+| Stage | Description |
+|-------|-------------|
+| `welcome` | Greet client and initialize session |
+| `intake_questions` | Collect personal, filing, income, deduction info |
+| `summary_review` | Present summary of collected information |
+| `summary_confirmation` | Client confirms or requests edits |
+| `document_checklist` | Generate and present required documents |
+| `availability_inquiry` | Collect scheduling preferences |
+| `taxpro_routing` | Match with appropriate tax professional |
+| `appointment_scheduling` | Book the appointment |
+| `reminders_setup` | Configure appointment reminders |
+| `complete` | Flow complete, ready for appointment |
+
+### 2. Conversational Intake
 - Step-by-step guided intake process
-- Collects personal info, filing status, dependents, income types, deductions
+- Collects personal info, filing status, spouse info (if married), dependents, income types, deductions
 - Identifies special situations (crypto, foreign accounts, rental properties)
 - Progress tracking and session management
 
-### 2. Smart Document Checklist
+### 3. Smart Document Checklist
 - Automatically generates personalized document lists
 - Based on income types (W-2, 1099-NEC, investments, crypto)
 - Tracks collected vs pending documents
 - Includes specific sources (e.g., "Download from Uber driver dashboard")
 
-### 3. Intelligent Reminders
+### 4. Intelligent Reminders
 - Personalized reminder messages
-- Context-aware: "Don't forget your 1099-NEC from Uber"
+- Context-aware notifications
 - Multi-channel support (email/SMS)
 - Appointment reminders at 24h and 1h before
 
-### 4. Tax Professional Routing
+### 5. Tax Professional Routing
 - Complexity scoring (0-100 scale)
 - Matches clients to specialists based on:
   - Complexity level (simple, moderate, complex, expert)
@@ -41,7 +58,7 @@ An intelligent MCP (Model Context Protocol) server for tax professionals that st
   - Tax pro availability and ratings
 - Alternative recommendations
 
-### 5. Appointment Optimization
+### 6. Appointment Optimization
 - Dynamic duration based on complexity and intake completion
 - Time savings tracking (e.g., "Save 15 minutes with completed intake")
 - Automatic reminder scheduling
@@ -49,9 +66,26 @@ An intelligent MCP (Model Context Protocol) server for tax professionals that st
 ## 📦 Installation
 
 ```bash
-cd tax-intake-mcp
+git clone https://github.com/Capithan/TaxPilot.git
+cd TaxPilot
 npm install
 npm run build
+```
+
+## ☁️ Deployment
+
+### Azure Web App
+
+See [AZURE_DEPLOY.md](AZURE_DEPLOY.md) for complete deployment instructions including:
+- Azure CLI deployment
+- GitHub Actions CI/CD
+- VS Code Azure extension deployment
+
+### Local Development
+
+```bash
+npm run build
+node dist/index.js
 ```
 
 ## 🔧 Configuration
@@ -65,7 +99,7 @@ Add to your `claude_desktop_config.json`:
   "mcpServers": {
     "tax-intake": {
       "command": "node",
-      "args": ["C:/Projects/ChatGPT APPS/tax-intake-mcp/dist/index.js"]
+      "args": ["/path/to/TaxPilot/dist/index.js"]
     }
   }
 }
@@ -80,6 +114,16 @@ node dist/index.js
 ```
 
 ## 🛠️ Available Tools
+
+### Flow Management Tools
+| Tool | Description |
+|------|-------------|
+| `get_conversation_flow` | Get current flow state and next actions |
+| `advance_conversation_flow` | Move to next stage in the flow |
+| `confirm_intake_summary` | Confirm or request edits to summary |
+| `set_scheduling_preferences` | Set client's availability preferences |
+| `select_tax_professional` | Select a tax professional for routing |
+| `get_flow_progress` | Get visual progress of conversation flow |
 
 ### Intake Tools
 | Tool | Description |
@@ -119,74 +163,78 @@ node dist/index.js
 | `list_tax_professionals` | View all available tax pros |
 | `get_client` | Get client profile |
 
-## 📝 Example Workflow
+## 📝 Conversation Flow Example
 
-### 1. Start Client Intake
-```
-User: I need to prepare for my tax appointment
-Assistant: [Calls start_intake]
-Assistant: Welcome! I'll help you prepare for your tax appointment. Let's start with your name...
-```
+### Complete Flow Walkthrough
 
-### 2. Complete Intake Questions
 ```
-User: John Smith
-Assistant: [Calls process_intake_response]
-Assistant: Nice to meet you, John! What's your email address?
-...
-```
+1. WELCOME
+   → System greets client, initializes session
 
-### 3. Generate Document Checklist
-```
-Assistant: [Calls generate_document_checklist]
-Assistant: Based on your situation, here's your personalized document checklist:
-- ✅ Government-issued Photo ID
-- ⬜ W-2 Forms from employers
-- ⬜ 1099-NEC from Uber
-- ⬜ Cryptocurrency transaction records
-...
-```
+2. INTAKE QUESTIONS
+   → Personal info, filing status, spouse (if married), dependents
+   → Employment, income types, deductions, special situations
 
-### 4. Create Reminders
-```
-Assistant: [Calls create_document_reminders]
-Assistant: I've created reminders for you:
-- "Hi John! 👋 Don't forget your 1099-NEC from Uber..."
-```
+3. SUMMARY REVIEW
+   → "Here's what I collected: Name: John Smith, Filing: MFJ..."
 
-### 5. Route to Tax Professional
-```
-Assistant: [Calls route_to_tax_pro]
-Assistant: Based on your complexity (moderate with crypto), 
-I've matched you with Michael Chen who specializes in 
-cryptocurrency and investments. ⭐⭐⭐⭐⭐
+4. SUMMARY CONFIRMATION
+   → Client confirms or requests edits
+
+5. DOCUMENT CHECKLIST
+   → "Based on your situation, you'll need: W-2, 1099-NEC..."
+
+6. AVAILABILITY INQUIRY
+   → "When are you available? Weekday mornings, evenings...?"
+
+7. TAX PRO ROUTING
+   → "Based on your crypto income, I recommend Michael Chen..."
+
+8. APPOINTMENT SCHEDULING
+   → "Booking Tuesday at 2pm with Michael Chen..."
+
+9. REMINDERS SETUP
+   → "You'll receive reminders 24h and 1h before..."
+
+10. COMPLETE
+    → "All set! See you at your appointment."
 ```
 
 ## 🏗️ Architecture
 
 ```
-tax-intake-mcp/
+TaxPilot/
 ├── src/
-│   ├── index.ts           # MCP Server entry point
+│   ├── index.ts              # MCP Server entry point & tool definitions
 │   ├── types/
-│   │   └── client.ts      # TypeScript interfaces
+│   │   ├── index.ts          # Type exports
+│   │   └── client.ts         # TypeScript interfaces & flow types
 │   ├── database/
-│   │   └── index.ts       # In-memory database
+│   │   └── index.ts          # In-memory database
 │   └── services/
-│       ├── intake.ts      # Intake conversation logic
-│       ├── checklist.ts   # Document checklist generator
-│       ├── reminders.ts   # Reminder system
-│       └── routing.ts     # Tax pro matching & routing
+│       ├── index.ts          # Service exports
+│       ├── flowManager.ts    # Conversation flow management
+│       ├── intake.ts         # Intake conversation logic
+│       ├── checklist.ts      # Document checklist generator
+│       ├── reminders.ts      # Reminder system
+│       ├── routing.ts        # Tax pro matching & routing
+│       └── taxproLoader.ts   # Tax professional data loader
+├── api/
+│   └── bridge.ts             # HTTP bridge for web deployment
+├── public/
+│   ├── index.html            # Web interface
+│   └── openapi.yaml          # API specification
 ├── package.json
 ├── tsconfig.json
+├── AZURE_DEPLOY.md           # Azure deployment guide
 └── README.md
 ```
 
 ## 🔮 Future Enhancements
 
-- [ ] Persistent database (PostgreSQL/MongoDB)
+- [ ] Persistent database (Azure SQL/CosmosDB)
 - [ ] Email/SMS integration (SendGrid, Twilio)
-- [ ] Calendar integration (Google Calendar, Outlook)
+- [ ] Calendar integration (Microsoft 365, Google Calendar)
 - [ ] Document upload and OCR
 - [ ] Multi-language support
 - [ ] Analytics dashboard

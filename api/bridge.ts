@@ -89,7 +89,7 @@ app.get('/logo.png', (_req, res) => {
 
 // Health check (API route - BEFORE static files)
 app.get('/health', (_req, res) => {
-  res.json({ ok: true, platform: 'vercel', service: 'tax-intake-mcp-bridge' });
+  res.json({ ok: true, platform: 'azure', service: 'tax-intake-mcp-bridge' });
 });
 
 // OpenAPI specification for ChatGPT Actions
@@ -301,7 +301,7 @@ app.get('/', (_req, res) => {
     const html = fs.readFileSync(indexPath, 'utf-8');
     res.type('text/html').send(html);
   } catch (e) {
-    res.type('text/plain').send('Tax Intake MCP Bridge - Vercel');
+    res.type('text/plain').send('TaxPilot MCP Bridge - Azure Web App');
   }
 });
 
