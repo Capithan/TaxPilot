@@ -28,12 +28,14 @@ import {
 import {
   calculateComplexityScore,
   getComplexityLevel,
+  findBestTaxPro,
   routeClientToTaxPro,
   createAppointment,
   getAppointmentEstimate,
   getTaxProRecommendations,
 } from '../services/routing.js';
 import { db } from '../database/index.js';
+import { chat, resetChatSession } from '../chatgpt/chatEngine.js';
 
 // Get __dirname in ESM
 const __filename = fileURLToPath(import.meta.url);
@@ -125,14 +127,39 @@ app.post('/intake/start', (req: Request, res: Response) => {
     sessionId: result.session.id,
     clientId: result.client.id,
     currentStep: result.currentStep,
+    totalSteps: 9,
+    percentComplete: 0,
     nextQuestion: result.nextQuestion,
+    _ui: {
+      type: 'intake_start',
+      title: '📋 Tax Intake Started',
+      subtitle: 'Let\'s collect your information step by step',
+      progress: { current: 1, total: 9, percent: 0 },
+      tip: 'Answer each question and I\'ll guide you through the entire process.'
+    }
   });
 });
 
 app.post('/intake/respond', (req: Request, res: Response) => {
   const { sessionId, answer } = req.body || {};
   const result = processIntakeResponse(sessionId, answer);
-  res.json(result);
+  const progress = getIntakeProgress(sessionId);
+  res.json({
+    ...result,
+    progress: progress ? {
+      currentStep: progress.currentStep,
+      completedSteps: progress.completedSteps,
+      totalSteps: progress.totalSteps,
+      percentComplete: progress.percentComplete,
+      remainingSteps: progress.remainingSteps,
+    } : undefined,
+    _ui: {
+      type: result.intakeCompleted ? 'intake_complete' : 'intake_question',
+      title: result.intakeCompleted ? '✅ Intake Complete!' : `Step: ${progress?.currentStep?.replace(/_/g, ' ') || 'processing'}`,
+      progress: progress ? { current: progress.completedSteps.length, total: progress.totalSteps, percent: progress.percentComplete } : undefined,
+      showConfetti: result.intakeCompleted || false,
+    }
+  });
 });
 
 app.get('/intake/progress/:sessionId', (req: Request, res: Response) => {
@@ -143,22 +170,98 @@ app.get('/intake/progress/:sessionId', (req: Request, res: Response) => {
 
 app.get('/client/:clientId/summary', (req: Request, res: Response) => {
   const { clientId } = req.params;
-  const summary = getIntakeSummary(clientId);
-  res.type('text/plain').send(summary);
+  const client = db.getClient(clientId);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  res.json({
+    clientId: client.id,
+    name: `${client.firstName} ${client.lastName}`,
+    email: client.email,
+    phone: client.phone,
+    filingStatus: client.filingStatus.replace(/_/g, ' '),
+    dependents: client.dependents.map(d => ({ name: `${d.firstName} ${d.lastName}`, relationship: d.relationship })),
+    incomeTypes: client.incomeTypes.map(t => t.replace(/_/g, ' ')),
+    deductions: client.deductions.map(d => d.replace(/_/g, ' ')),
+    specialSituations: [
+      ...(client.hasCrypto ? ['Cryptocurrency'] : []),
+      ...(client.hasForeignAccounts ? ['Foreign accounts'] : []),
+      ...(client.hasRentalProperty ? ['Rental property'] : []),
+      ...(client.hasBusinessIncome ? ['Business income'] : []),
+    ],
+    complexityScore: client.complexityScore,
+    intakeCompleted: client.intakeCompleted,
+    _ui: {
+      type: 'client_summary',
+      title: `👤 ${client.firstName} ${client.lastName}`,
+      subtitle: `${client.filingStatus.replace(/_/g, ' ')} · Complexity: ${client.complexityScore}/100`,
+      sections: [
+        { icon: '💰', label: 'Income', items: client.incomeTypes.map(t => t.replace(/_/g, ' ')) },
+        { icon: '📝', label: 'Deductions', items: client.deductions.map(d => d.replace(/_/g, ' ')) },
+        { icon: '⚠️', label: 'Special', items: [
+          ...(client.hasCrypto ? ['Crypto'] : []),
+          ...(client.hasForeignAccounts ? ['Foreign'] : []),
+          ...(client.hasRentalProperty ? ['Rental'] : []),
+          ...(client.hasBusinessIncome ? ['Business'] : []),
+        ]},
+      ],
+      complexityBadge: client.complexityScore < 30 ? 'Simple' : client.complexityScore < 60 ? 'Moderate' : client.complexityScore < 80 ? 'Complex' : 'Expert'
+    }
+  });
 });
 
 // Checklist endpoints
 app.post('/client/:clientId/checklist/generate', (req: Request, res: Response) => {
   const { clientId } = req.params;
   const checklist = generateDocumentChecklist(clientId);
-  res.type('text/plain').send(formatChecklistForDisplay(checklist));
+  const collected = checklist.documents.filter(d => d.collected).length;
+  const total = checklist.documents.length;
+  const byCategory: Record<string, Array<{id: string; name: string; description: string; required: boolean; collected: boolean}>> = {};
+  checklist.documents.forEach(d => {
+    if (!byCategory[d.category]) byCategory[d.category] = [];
+    byCategory[d.category].push({ id: d.id, name: d.name, description: d.description, required: d.required, collected: d.collected });
+  });
+  res.json({
+    clientId,
+    totalDocuments: total,
+    collected,
+    pending: total - collected,
+    percentComplete: total > 0 ? Math.round((collected / total) * 100) : 0,
+    categories: byCategory,
+    _ui: {
+      type: 'document_checklist',
+      title: '📋 Your Document Checklist',
+      subtitle: `${collected}/${total} collected`,
+      progress: { current: collected, total, percent: total > 0 ? Math.round((collected / total) * 100) : 0 },
+      renderAs: 'checklist_with_categories'
+    }
+  });
 });
 
 app.get('/client/:clientId/checklist', (req: Request, res: Response) => {
   const { clientId } = req.params;
   const checklist = getDocumentChecklist(clientId);
   if (!checklist) return res.status(404).json({ error: 'Checklist not found' });
-  res.type('text/plain').send(formatChecklistForDisplay(checklist));
+  const collected = checklist.documents.filter(d => d.collected).length;
+  const total = checklist.documents.length;
+  const byCategory: Record<string, Array<{id: string; name: string; description: string; required: boolean; collected: boolean}>> = {};
+  checklist.documents.forEach(d => {
+    if (!byCategory[d.category]) byCategory[d.category] = [];
+    byCategory[d.category].push({ id: d.id, name: d.name, description: d.description, required: d.required, collected: d.collected });
+  });
+  res.json({
+    clientId,
+    totalDocuments: total,
+    collected,
+    pending: total - collected,
+    percentComplete: total > 0 ? Math.round((collected / total) * 100) : 0,
+    categories: byCategory,
+    _ui: {
+      type: 'document_checklist',
+      title: '📋 Document Checklist',
+      subtitle: `${collected}/${total} collected`,
+      progress: { current: collected, total, percent: total > 0 ? Math.round((collected / total) * 100) : 0 },
+      renderAs: 'checklist_with_categories'
+    }
+  });
 });
 
 app.post('/client/:clientId/checklist/collect', (req: Request, res: Response) => {
@@ -179,17 +282,40 @@ app.post('/client/:clientId/reminders/documents', (req: Request, res: Response) 
   const { clientId } = req.params;
   const { appointmentId } = req.body || {};
   const pending = getPendingDocuments(clientId);
-  if (pending.length === 0) return res.json({ message: 'No pending documents' });
+  if (pending.length === 0) return res.json({ message: 'No pending documents', reminders: [] });
   const reminders = createDocumentReminder(clientId, appointmentId, pending);
-  res.type('text/plain').send(
-    reminders.map((r) => `- ${r.message}`).join('\n')
-  );
+  res.json({
+    totalReminders: reminders.length,
+    reminders: reminders.map(r => ({
+      id: r.id,
+      message: r.message,
+      channel: r.channel,
+      scheduledFor: r.scheduledFor,
+      documentIds: r.documentIds,
+    })),
+    _ui: {
+      type: 'reminders_created',
+      title: '🔔 Reminders Set',
+      subtitle: `${reminders.length} reminder(s) created`,
+    }
+  });
 });
 
 app.get('/client/:clientId/reminders', (req: Request, res: Response) => {
   const { clientId } = req.params;
   const reminders = getClientReminders(clientId);
-  res.type('text/plain').send(formatRemindersForDisplay(reminders));
+  const pending = reminders.filter(r => !r.sent);
+  const sent = reminders.filter(r => r.sent);
+  res.json({
+    total: reminders.length,
+    pending: pending.map(r => ({ id: r.id, type: r.type, message: r.message, scheduledFor: r.scheduledFor, channel: r.channel })),
+    sent: sent.map(r => ({ id: r.id, type: r.type, message: r.message, sentAt: r.sentAt, channel: r.channel })),
+    _ui: {
+      type: 'reminders_list',
+      title: '🔔 Client Reminders',
+      subtitle: `${pending.length} pending · ${sent.length} sent`,
+    }
+  });
 });
 
 app.post('/reminders/send', (req: Request, res: Response) => {
@@ -214,13 +340,49 @@ app.post('/appointments', (req: Request, res: Response) => {
 app.get('/client/:clientId/appointment/estimate', (req: Request, res: Response) => {
   const { clientId } = req.params;
   const estimate = getAppointmentEstimate(clientId);
-  res.type('text/plain').send(estimate.message);
+  res.json({
+    estimatedDuration: estimate.estimatedDuration,
+    timeSaved: estimate.savings,
+    complexityLevel: estimate.complexityLevel,
+    _ui: {
+      type: 'appointment_estimate',
+      title: '⏱️ Appointment Estimate',
+      subtitle: `${estimate.estimatedDuration} minutes · ${estimate.complexityLevel} complexity`,
+      highlight: estimate.savings > 0 ? `Saving ${estimate.savings} min thanks to pre-intake!` : undefined,
+      badge: estimate.complexityLevel,
+    }
+  });
 });
 
 app.get('/client/:clientId/recommendations', (req: Request, res: Response) => {
   const { clientId } = req.params;
-  const recs = getTaxProRecommendations(clientId);
-  res.type('text/plain').send(recs);
+  const client = db.getClient(clientId);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  const { taxPro, reason, alternates } = findBestTaxPro(client);
+  const formatPro = (p: any) => ({
+    id: p.id,
+    name: p.name,
+    specializations: p.specializations.map((s: string) => s.replace(/_/g, ' ')),
+    rating: p.rating,
+    available: p.available,
+    currentLoad: p.currentLoad,
+    maxDailyAppointments: p.maxDailyAppointments,
+  });
+  res.json({
+    recommended: taxPro ? formatPro(taxPro) : null,
+    reason,
+    alternates: alternates.map(formatPro),
+    _ui: {
+      type: 'tax_pro_recommendations',
+      title: '👨‍💼 Recommended Tax Professionals',
+      subtitle: taxPro ? `Best match: ${taxPro.name}` : 'No match found',
+      renderAs: 'pro_cards',
+      cards: [
+        ...(taxPro ? [{ name: taxPro.name, badge: '⭐ Best Match', rating: taxPro.rating, specs: taxPro.specializations }] : []),
+        ...alternates.map(a => ({ name: a.name, badge: 'Alternative', rating: a.rating, specs: a.specializations })),
+      ]
+    }
+  });
 });
 
 app.get('/tax-pros', (_req: Request, res: Response) => {
@@ -580,6 +742,40 @@ app.post('/messages', (req: Request, res: Response) => {
   }
   
   res.json(response);
+});
+
+// ─── ChatGPT SDK-powered chat API ────────────────────────────────────────────
+app.post('/api/chat', async (req: Request, res: Response) => {
+  try {
+    const { message, chatId } = req.body || {};
+    if (!message) {
+      return res.status(400).json({ error: 'message is required' });
+    }
+    const id = chatId || crypto.randomUUID();
+    const result = await chat(id, message);
+    res.json(result);
+  } catch (error) {
+    console.error('Chat error:', error);
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Chat failed' });
+  }
+});
+
+app.post('/api/chat/reset', (req: Request, res: Response) => {
+  const { chatId } = req.body || {};
+  if (chatId) resetChatSession(chatId);
+  res.json({ ok: true });
+});
+
+// Serve the chat UI
+app.get('/chat', (_req: Request, res: Response) => {
+  try {
+    const publicDir = path.join(__dirname, '..', '..', 'public');
+    const chatPath = path.join(publicDir, 'chat.html');
+    const html = fs.readFileSync(chatPath, 'utf-8');
+    res.type('text/html').send(html);
+  } catch (e) {
+    res.status(404).send('Chat UI not found');
+  }
 });
 
 // Root endpoint

@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import app from './dist/bridge/server.js';
 
 const PORT = process.env.PORT || 8080;

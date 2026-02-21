@@ -1,0 +1,550 @@
+openapi: 3.1.0
+info:
+  title: TaxPilot
+  description: |
+    Tax appointment preparation assistant. Guides users through intake, 
+    document collection, tax professional matching, and appointment booking.
+    
+    IMPORTANT: All responses include a `_ui` object with rendering hints.
+    Use `_ui.type` to decide how to format the response.
+    Use `_ui.progress` to show progress bars.
+    Use `_ui.title` and `_ui.subtitle` as section headers.
+  version: 2.0.0
+servers:
+  - url: https://taxpilot-e9ewftfzehcvdmbf.centralus-01.azurewebsites.net
+
+paths:
+  /intake/start:
+    post:
+      operationId: startIntake
+      summary: Start a new tax intake session
+      description: |
+        Begins the intake flow. Returns sessionId, clientId, and the first question.
+        ALWAYS call this first. Save the sessionId and clientId for all subsequent calls.
+        
+        Display the _ui.title as a header, show the progress bar from _ui.progress,
+        then present the nextQuestion conversationally.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                clientId:
+                  type: string
+                  description: Optional existing client ID to resume
+      responses:
+        "200":
+          description: Session started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessionId:
+                    type: string
+                  clientId:
+                    type: string
+                  currentStep:
+                    type: string
+                  totalSteps:
+                    type: integer
+                  percentComplete:
+                    type: integer
+                  nextQuestion:
+                    type: string
+                  _ui:
+                    type: object
+                    description: Rendering hints for display
+
+  /intake/respond:
+    post:
+      operationId: processIntakeResponse
+      summary: Submit client's answer and get next question
+      description: |
+        Send the answer to the current question. Returns the next question and progress.
+        Keep calling until `intakeCompleted` is true.
+        
+        After each response, show a progress bar using _ui.progress (e.g., "████░░░░ 45%").
+        If intakeCompleted is true, celebrate with confetti-like message and suggest next steps.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId, answer]
+              properties:
+                sessionId:
+                  type: string
+                answer:
+                  type: string
+                  description: The client's natural language answer
+      responses:
+        "200":
+          description: Response processed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  nextQuestion:
+                    type: string
+                  currentStep:
+                    type: string
+                  intakeCompleted:
+                    type: boolean
+                  progress:
+                    type: object
+                    properties:
+                      currentStep:
+                        type: string
+                      completedSteps:
+                        type: array
+                        items:
+                          type: string
+                      totalSteps:
+                        type: integer
+                      percentComplete:
+                        type: integer
+                  _ui:
+                    type: object
+
+  /intake/progress/{sessionId}:
+    get:
+      operationId: getIntakeProgress
+      summary: Check intake progress
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Progress data
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /client/{clientId}/summary:
+    get:
+      operationId: getClientSummary
+      summary: Get structured client profile summary
+      description: |
+        Returns the full client profile as structured JSON with sections for income, 
+        deductions, dependents, and special situations.
+        
+        Render this as a profile card:
+        - Show _ui.title as a header with the client name
+        - Show _ui.complexityBadge as a colored badge
+        - Render each _ui.sections entry as a labeled group with bullet items
+        - Use a table format for dependents if any exist
+      parameters:
+        - name: clientId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Client profile
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  clientId:
+                    type: string
+                  name:
+                    type: string
+                  email:
+                    type: string
+                  filingStatus:
+                    type: string
+                  dependents:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        relationship:
+                          type: string
+                  incomeTypes:
+                    type: array
+                    items:
+                      type: string
+                  deductions:
+                    type: array
+                    items:
+                      type: string
+                  specialSituations:
+                    type: array
+                    items:
+                      type: string
+                  complexityScore:
+                    type: integer
+                  intakeCompleted:
+                    type: boolean
+                  _ui:
+                    type: object
+
+  /client/{clientId}/checklist/generate:
+    post:
+      operationId: generateChecklist
+      summary: Generate personalized document checklist
+      description: |
+        Creates a checklist grouped by category (income, identity, investments, etc.).
+        Each document has id, name, description, required flag, and collected status.
+        
+        Render as a categorized checklist:
+        - Show _ui.progress as a progress bar
+        - Group documents by category from `categories` object
+        - Use ✅ for collected, ☐ for pending, ⚠️ for required+pending
+        - Show total progress: "3/12 documents collected"
+      parameters:
+        - name: clientId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Categorized document checklist
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  clientId:
+                    type: string
+                  totalDocuments:
+                    type: integer
+                  collected:
+                    type: integer
+                  pending:
+                    type: integer
+                  percentComplete:
+                    type: integer
+                  categories:
+                    type: object
+                    description: Documents grouped by category name
+                    additionalProperties:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          id:
+                            type: string
+                          name:
+                            type: string
+                          description:
+                            type: string
+                          required:
+                            type: boolean
+                          collected:
+                            type: boolean
+                  _ui:
+                    type: object
+
+  /client/{clientId}/checklist:
+    get:
+      operationId: getChecklist
+      summary: Get current document checklist status
+      description: Same format as generateChecklist. Use to check current status.
+      parameters:
+        - name: clientId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Current checklist
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /client/{clientId}/checklist/collect:
+    post:
+      operationId: markDocumentCollected
+      summary: Mark a document as collected
+      description: |
+        Call when user says they have a document ready.
+        Use the document `id` from the checklist response.
+        After marking, show updated progress.
+      parameters:
+        - name: clientId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [documentId]
+              properties:
+                documentId:
+                  type: string
+      responses:
+        "200":
+          description: Document marked
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /client/{clientId}/checklist/pending:
+    get:
+      operationId: getPendingDocuments
+      summary: Get documents still needed
+      parameters:
+        - name: clientId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Pending documents array
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    name:
+                      type: string
+                    description:
+                      type: string
+                    category:
+                      type: string
+                    required:
+                      type: boolean
+
+  /client/{clientId}/reminders/documents:
+    post:
+      operationId: createDocumentReminders
+      summary: Create reminders for pending documents
+      parameters:
+        - name: clientId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                appointmentId:
+                  type: string
+      responses:
+        "200":
+          description: Reminders created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totalReminders:
+                    type: integer
+                  reminders:
+                    type: array
+                    items:
+                      type: object
+                  _ui:
+                    type: object
+
+  /client/{clientId}/reminders:
+    get:
+      operationId: getClientReminders
+      summary: Get all reminders for a client
+      parameters:
+        - name: clientId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Reminders grouped by status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                  pending:
+                    type: array
+                    items:
+                      type: object
+                  sent:
+                    type: array
+                    items:
+                      type: object
+                  _ui:
+                    type: object
+
+  /client/{clientId}/route:
+    post:
+      operationId: routeToTaxPro
+      summary: Match client to best tax professional
+      description: |
+        Analyzes complexity and returns the best-matched tax pro plus alternates.
+        Show the recommended pro as a highlighted card with rating stars.
+      parameters:
+        - name: clientId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Routing result
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /client/{clientId}/appointment/estimate:
+    get:
+      operationId: getAppointmentEstimate
+      summary: Estimate appointment duration
+      description: |
+        Returns duration in minutes, time saved vs no pre-intake, and complexity level.
+        Show as a card with the duration prominently displayed.
+        Highlight time savings if timeSaved > 0.
+      parameters:
+        - name: clientId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Duration estimate
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  estimatedDuration:
+                    type: integer
+                    description: Minutes
+                  timeSaved:
+                    type: integer
+                    description: Minutes saved due to pre-intake
+                  complexityLevel:
+                    type: string
+                    enum: [simple, moderate, complex, expert]
+                  _ui:
+                    type: object
+
+  /client/{clientId}/recommendations:
+    get:
+      operationId: getTaxProRecommendations
+      summary: Get ranked tax professional recommendations
+      description: |
+        Returns the best match and alternatives as structured objects.
+        
+        Render as pro cards:
+        - Best match with a ⭐ badge, name, rating stars, specializations
+        - Alternatives below with "Alternative" badge
+        - Include "Book appointment" suggestion for the recommended pro
+      parameters:
+        - name: clientId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Recommendations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  recommended:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      name:
+                        type: string
+                      specializations:
+                        type: array
+                        items:
+                          type: string
+                      rating:
+                        type: number
+                  reason:
+                    type: string
+                  alternates:
+                    type: array
+                    items:
+                      type: object
+                  _ui:
+                    type: object
+
+  /appointments:
+    post:
+      operationId: createAppointment
+      summary: Book an appointment
+      description: |
+        Schedule with the matched tax pro. Always confirm details with the user first.
+        Show a confirmation card with date/time, tax pro name, duration, and type.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [clientId, taxProId, scheduledAt]
+              properties:
+                clientId:
+                  type: string
+                taxProId:
+                  type: string
+                scheduledAt:
+                  type: string
+                  format: date-time
+                  description: "ISO datetime, e.g. 2026-03-15T10:00:00"
+                type:
+                  type: string
+                  enum: [in-person, virtual]
+      responses:
+        "200":
+          description: Appointment booked
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /health:
+    get:
+      operationId: healthCheck
+      summary: Health check
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
