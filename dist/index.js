@@ -3,11 +3,21 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema, ListPromptsRequestSchema, GetPromptRequestSchema, } from '@modelcontextprotocol/sdk/types.js';
 import { startIntakeSession, processIntakeResponse, getIntakeProgress, getIntakeSummary, } from './services/intake.js';
-import { generateDocumentChecklist, getDocumentChecklist, markDocumentCollected, formatChecklistForDisplay, getPendingDocuments, } from './services/checklist.js';
-import { createDocumentReminder, getClientReminders, sendReminder, formatRemindersForDisplay, scheduleAppointmentReminders, } from './services/reminders.js';
-import { calculateComplexityScore, getComplexityLevel, routeClientToTaxPro, createAppointment, getAppointmentEstimate, getTaxProRecommendations, } from './services/routing.js';
-import { getFlowState, getOrCreateFlowState, advanceFlow, confirmSummary, setSchedulingPreferences, setSelectedTaxPro, getFlowProgressDisplay, syncFlowWithState, getNextActionInstructions, } from './services/flowManager.js';
+import { generateDocumentChecklist, getDocumentChecklist, markDocumentCollected, getPendingDocuments, } from './services/checklist.js';
+import { createDocumentReminder, getClientReminders, sendReminder, scheduleAppointmentReminders, } from './services/reminders.js';
+import { calculateComplexityScore, getComplexityLevel, findBestTaxPro, routeClientToTaxPro, createAppointment, getAppointmentEstimate, } from './services/routing.js';
+import { getFlowState, getOrCreateFlowState, getFlowStatus, advanceFlow, confirmSummary, setSchedulingPreferences, setSelectedTaxPro, syncFlowWithState, getNextActionInstructions, } from './services/flowManager.js';
 import { db } from './database/index.js';
+// UI Formatters
+import { formatIntakeStart, formatIntakeResponse, formatIntakeProgress, formatClientSummary, } from './ui/formatters/intake.js';
+import { formatDocumentChecklist, formatDocumentCollected, formatPendingDocuments, } from './ui/formatters/checklist.js';
+import { formatComplexityScore, formatRoutingResult, formatTaxProRecommendations, formatAppointmentEstimate, formatAppointmentCreated, formatTaxProList, formatClientProfile, } from './ui/formatters/routing.js';
+import { formatRemindersCreated, formatRemindersList, formatReminderSent, } from './ui/formatters/reminders.js';
+import { formatFlowStatus, formatFlowAdvanced, formatSummaryConfirmed, formatSchedulingPreferences, formatTaxProSelected, formatFlowProgress, } from './ui/formatters/flow.js';
+/** Wrap a UIResponse into the MCP content block format. */
+function toMcpContent(uiResp) {
+    return { content: [{ type: 'text', text: JSON.stringify(uiResp, null, 2) }] };
+}
 // Create the MCP server
 const server = new Server({
     name: 'tax-intake-mcp',
@@ -427,209 +437,94 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 // Initialize the conversation flow
                 const flowState = getOrCreateFlowState(result.client.id, result.session.id);
                 advanceFlow(result.client.id, { started: true }); // Advance past welcome stage
-                const flowInstructions = getNextActionInstructions(result.client.id);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify({
-                                sessionId: result.session.id,
-                                clientId: result.client.id,
-                                currentStep: result.currentStep,
-                                nextQuestion: result.nextQuestion,
-                                message: 'Intake session started. Ask the client the next question.',
-                                flowStage: flowState.currentStage,
-                            }, null, 2) + `\n\n---\n\n## Flow Instructions:\n${flowInstructions}`,
-                        },
-                    ],
-                };
+                return toMcpContent(formatIntakeStart(result, flowState.currentStage));
             }
             case 'process_intake_response': {
                 const result = processIntakeResponse(args?.sessionId, args?.answer);
                 // Check if intake is complete and advance flow
-                let flowMessage = '';
                 if (result.intakeCompleted && result.client) {
-                    // Advance to summary_review stage
                     const flowState = getOrCreateFlowState(result.client.id, args?.sessionId);
                     advanceFlow(result.client.id, { completed: true });
-                    const flowInstructions = getNextActionInstructions(result.client.id);
-                    flowMessage = `\n\n---\n\n## 🎉 Intake Complete! Flow Instructions:\n${flowInstructions}`;
                 }
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify(result, null, 2) + flowMessage,
-                        },
-                    ],
-                };
+                // Get progress for the UI
+                const intakeProgress = getIntakeProgress(args?.sessionId);
+                return toMcpContent(formatIntakeResponse(result, args?.sessionId, intakeProgress ? {
+                    completedSteps: intakeProgress.completedSteps,
+                    totalSteps: intakeProgress.totalSteps,
+                    percentComplete: intakeProgress.percentComplete,
+                } : undefined));
             }
             case 'get_intake_progress': {
                 const progress = getIntakeProgress(args?.sessionId);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: progress
-                                ? JSON.stringify(progress, null, 2)
-                                : 'Session not found',
-                        },
-                    ],
-                };
+                return toMcpContent(formatIntakeProgress(progress, args?.sessionId));
             }
             case 'get_client_summary': {
                 const clientId = args?.clientId;
                 const summary = getIntakeSummary(clientId);
+                const client = db.getClient(clientId);
                 // Mark that summary has been shown - advance the flow
                 const flowState = getFlowState(clientId);
                 if (flowState && flowState.currentStage === 'summary_review') {
                     advanceFlow(clientId, { shown: true });
                 }
-                const flowInstructions = getNextActionInstructions(clientId);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: summary + `\n\n---\n\n**Please confirm:** Is this information correct? Would you like to make any changes?\n\n## Flow Instructions:\n${flowInstructions}`,
-                        },
-                    ],
-                };
+                if (!client) {
+                    return { content: [{ type: 'text', text: 'Client not found' }] };
+                }
+                return toMcpContent(formatClientSummary(client, summary));
             }
             // Document Checklist Tools
             case 'generate_document_checklist': {
                 const clientId = args?.clientId;
                 const checklist = generateDocumentChecklist(clientId);
-                const formatted = formatChecklistForDisplay(checklist);
-                // Advance the flow - document checklist is generated
+                // Advance the flow
                 advanceFlow(clientId, { generated: true, documentCount: checklist.documents.length });
-                const flowInstructions = getNextActionInstructions(clientId);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: formatted + `\n\n---\n\n## Next Steps:\n${flowInstructions}`,
-                        },
-                    ],
-                };
+                return toMcpContent(formatDocumentChecklist(checklist, 'generate_document_checklist'));
             }
             case 'get_document_checklist': {
                 const checklist = getDocumentChecklist(args?.clientId);
                 if (!checklist) {
                     return {
-                        content: [
-                            {
-                                type: 'text',
-                                text: 'No checklist found. Generate one first using generate_document_checklist.',
-                            },
-                        ],
+                        content: [{ type: 'text', text: 'No checklist found. Generate one first using generate_document_checklist.' }],
                     };
                 }
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: formatChecklistForDisplay(checklist),
-                        },
-                    ],
-                };
+                return toMcpContent(formatDocumentChecklist(checklist, 'get_document_checklist'));
             }
             case 'mark_document_collected': {
                 const result = markDocumentCollected(args?.clientId, args?.documentId);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify(result, null, 2),
-                        },
-                    ],
-                };
+                return toMcpContent(formatDocumentCollected(result, args?.clientId, args?.documentId));
             }
             case 'get_pending_documents': {
                 const pending = getPendingDocuments(args?.clientId);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: pending.length > 0
-                                ? `Pending Documents (${pending.length}):\n\n${pending.map((d) => `- ${d.name}: ${d.description}`).join('\n')}`
-                                : 'All required documents have been collected! ✅',
-                        },
-                    ],
-                };
+                return toMcpContent(formatPendingDocuments(pending, args?.clientId));
             }
             // Reminder Tools
             case 'create_document_reminders': {
                 const pending = getPendingDocuments(args?.clientId);
                 if (pending.length === 0) {
                     return {
-                        content: [
-                            {
-                                type: 'text',
-                                text: 'No pending documents to create reminders for.',
-                            },
-                        ],
+                        content: [{ type: 'text', text: 'No pending documents to create reminders for.' }],
                     };
                 }
                 const reminders = createDocumentReminder(args?.clientId, args?.appointmentId, pending);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: `Created ${reminders.length} personalized reminders:\n\n${reminders.map((r) => `- ${r.message}`).join('\n\n')}`,
-                        },
-                    ],
-                };
+                return toMcpContent(formatRemindersCreated(reminders, args?.clientId));
             }
             case 'get_client_reminders': {
                 const reminders = getClientReminders(args?.clientId);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: formatRemindersForDisplay(reminders),
-                        },
-                    ],
-                };
+                return toMcpContent(formatRemindersList(reminders, args?.clientId));
             }
             case 'send_reminder': {
                 const result = sendReminder(args?.reminderId);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify(result, null, 2),
-                        },
-                    ],
-                };
+                return toMcpContent(formatReminderSent(result, args?.reminderId));
             }
             // Routing Tools
             case 'calculate_complexity': {
                 const client = db.getClient(args?.clientId);
                 if (!client) {
-                    return {
-                        content: [
-                            {
-                                type: 'text',
-                                text: 'Client not found',
-                            },
-                        ],
-                    };
+                    return { content: [{ type: 'text', text: 'Client not found' }] };
                 }
                 const score = calculateComplexityScore(client);
                 const level = getComplexityLevel(score);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify({
-                                clientId: client.id,
-                                complexityScore: score,
-                                complexityLevel: level,
-                                interpretation: getComplexityInterpretation(level),
-                            }, null, 2),
-                        },
-                    ],
-                };
+                return toMcpContent(formatComplexityScore(client.id, score, level));
             }
             case 'route_to_tax_pro': {
                 const clientId = args?.clientId;
@@ -638,113 +533,43 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 if (result.success && result.taxPro) {
                     setSelectedTaxPro(clientId, result.taxPro.id);
                 }
-                const flowInstructions = getNextActionInstructions(clientId);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: result.success
-                                ? `✅ Client routed successfully!\n\n${result.message}\n\n---\n\n## Next Steps:\n${flowInstructions}`
-                                : `❌ Routing failed: ${result.message}`,
-                        },
-                    ],
-                };
+                return toMcpContent(formatRoutingResult(result, clientId));
             }
             case 'get_tax_pro_recommendations': {
-                const recommendations = getTaxProRecommendations(args?.clientId);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: recommendations,
-                        },
-                    ],
-                };
+                const clientId = args?.clientId;
+                const client = db.getClient(clientId);
+                if (!client) {
+                    return { content: [{ type: 'text', text: 'Client not found' }] };
+                }
+                const { taxPro, reason, alternates } = findBestTaxPro(client);
+                return toMcpContent(formatTaxProRecommendations(clientId, taxPro, reason, alternates));
             }
             case 'create_appointment': {
                 const clientId = args?.clientId;
                 const appointment = createAppointment(clientId, args?.taxProId, new Date(args?.scheduledAt), args?.type || 'virtual');
                 // Schedule reminders for the appointment
                 const reminders = scheduleAppointmentReminders(appointment);
-                // Advance the flow - appointment created, advance to reminders_setup
+                // Advance the flow
                 advanceFlow(clientId, { created: true, appointmentId: appointment.id });
-                // Also advance past reminders_setup since they're auto-created
                 advanceFlow(clientId, { created: true, reminderCount: reminders.length });
-                const flowInstructions = getNextActionInstructions(clientId);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify({
-                                success: true,
-                                appointment: {
-                                    id: appointment.id,
-                                    scheduledAt: appointment.scheduledAt,
-                                    duration: appointment.duration,
-                                    type: appointment.type,
-                                    estimatedComplexity: appointment.estimatedComplexity,
-                                },
-                                remindersScheduled: reminders.length,
-                                message: `Appointment created for ${appointment.duration} minutes. ${reminders.length} reminders scheduled.`,
-                            }, null, 2) + `\n\n---\n\n## Flow Complete! 🎉\n${flowInstructions}`,
-                        },
-                    ],
-                };
+                const taxPro = db.getTaxPro(args?.taxProId) ?? null;
+                return toMcpContent(formatAppointmentCreated(appointment, taxPro, reminders.length));
             }
             case 'get_appointment_estimate': {
                 const estimate = getAppointmentEstimate(args?.clientId);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: estimate.message,
-                        },
-                    ],
-                };
+                return toMcpContent(formatAppointmentEstimate(estimate, args?.clientId));
             }
             // Utility Tools
             case 'list_tax_professionals': {
                 const taxPros = db.getAllTaxPros();
-                let output = '# Available Tax Professionals\n\n';
-                taxPros.forEach((tp) => {
-                    const available = tp.currentLoad < tp.maxDailyAppointments;
-                    output += `## ${tp.name} ${available ? '🟢' : '🔴'}\n`;
-                    output += `- **ID:** ${tp.id}\n`;
-                    output += `- **Email:** ${tp.email}\n`;
-                    output += `- **Specializations:** ${tp.specializations.map((s) => s.replace(/_/g, ' ')).join(', ')}\n`;
-                    output += `- **Max Complexity:** ${tp.maxComplexity}\n`;
-                    output += `- **Availability:** ${tp.maxDailyAppointments - tp.currentLoad} slots remaining\n`;
-                    output += `- **Rating:** ${'⭐'.repeat(Math.floor(tp.rating))} (${tp.rating}/5)\n\n`;
-                });
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: output,
-                        },
-                    ],
-                };
+                return toMcpContent(formatTaxProList(taxPros));
             }
             case 'get_client': {
                 const client = db.getClient(args?.clientId);
                 if (!client) {
-                    return {
-                        content: [
-                            {
-                                type: 'text',
-                                text: 'Client not found',
-                            },
-                        ],
-                    };
+                    return { content: [{ type: 'text', text: 'Client not found' }] };
                 }
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify(client, null, 2),
-                        },
-                    ],
-                };
+                return toMcpContent(formatClientProfile(client));
             }
             // ============================================
             // CONVERSATION FLOW MANAGEMENT HANDLERS
@@ -753,74 +578,35 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 const clientId = args?.clientId;
                 const sessionId = args?.sessionId;
                 if (!clientId) {
-                    return {
-                        content: [
-                            {
-                                type: 'text',
-                                text: 'Client ID is required. Start a new intake session first using start_intake.',
-                            },
-                        ],
-                    };
+                    return { content: [{ type: 'text', text: 'Client ID is required. Start a new intake session first using start_intake.' }] };
                 }
                 // Sync flow with actual state
-                const flowState = syncFlowWithState(clientId, sessionId || '');
+                syncFlowWithState(clientId, sessionId || '');
+                const flowStatus = getFlowStatus(clientId);
                 const instructions = getNextActionInstructions(clientId);
-                const progress = getFlowProgressDisplay(clientId);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: `${instructions}\n\n---\n\n${progress}`,
-                        },
-                    ],
-                };
+                if (!flowStatus) {
+                    return { content: [{ type: 'text', text: 'No active flow. Use start_intake to begin.' }] };
+                }
+                return toMcpContent(formatFlowStatus(flowStatus, instructions, clientId));
             }
             case 'advance_conversation_flow': {
                 const clientId = args?.clientId;
                 const stageData = args?.stageData;
                 const result = advanceFlow(clientId, stageData);
                 if (!result) {
-                    return {
-                        content: [
-                            {
-                                type: 'text',
-                                text: 'No active flow found for this client. Start a new session first.',
-                            },
-                        ],
-                    };
+                    return { content: [{ type: 'text', text: 'No active flow found for this client. Start a new session first.' }] };
                 }
                 const instructions = getNextActionInstructions(clientId);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: `✅ Flow advanced!\n\n${instructions}`,
-                        },
-                    ],
-                };
+                return toMcpContent(formatFlowAdvanced(result, instructions, clientId));
             }
             case 'confirm_intake_summary': {
                 const clientId = args?.clientId;
                 const result = confirmSummary(clientId);
                 if (!result) {
-                    return {
-                        content: [
-                            {
-                                type: 'text',
-                                text: 'No active flow found for this client.',
-                            },
-                        ],
-                    };
+                    return { content: [{ type: 'text', text: 'No active flow found for this client.' }] };
                 }
                 const instructions = getNextActionInstructions(clientId);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: `✅ Summary confirmed by user!\n\n${instructions}`,
-                        },
-                    ],
-                };
+                return toMcpContent(formatSummaryConfirmed(result, instructions, clientId));
             }
             case 'set_scheduling_preferences': {
                 const clientId = args?.clientId;
@@ -831,61 +617,29 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 };
                 const result = setSchedulingPreferences(clientId, preferences);
                 if (!result) {
-                    return {
-                        content: [
-                            {
-                                type: 'text',
-                                text: 'No active flow found for this client.',
-                            },
-                        ],
-                    };
+                    return { content: [{ type: 'text', text: 'No active flow found for this client.' }] };
                 }
                 const instructions = getNextActionInstructions(clientId);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: `✅ Scheduling preferences saved!\n\n**Preferences:**\n- Dates: ${preferences.preferredDates.join(', ') || 'Any'}\n- Times: ${preferences.preferredTimes.join(', ') || 'Any'}\n- Type: ${preferences.appointmentType}\n\n${instructions}`,
-                        },
-                    ],
-                };
+                return toMcpContent(formatSchedulingPreferences(preferences, instructions, clientId));
             }
             case 'select_tax_professional': {
                 const clientId = args?.clientId;
                 const taxProId = args?.taxProId;
                 const result = setSelectedTaxPro(clientId, taxProId);
                 if (!result) {
-                    return {
-                        content: [
-                            {
-                                type: 'text',
-                                text: 'No active flow found for this client.',
-                            },
-                        ],
-                    };
+                    return { content: [{ type: 'text', text: 'No active flow found for this client.' }] };
                 }
                 const taxPro = db.getTaxPro(taxProId);
                 const instructions = getNextActionInstructions(clientId);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: `✅ Tax professional selected: ${taxPro?.name || taxProId}\n\n${instructions}`,
-                        },
-                    ],
-                };
+                return toMcpContent(formatTaxProSelected(taxPro?.name || taxProId, taxProId, instructions, clientId));
             }
             case 'get_flow_progress': {
                 const clientId = args?.clientId;
-                const progress = getFlowProgressDisplay(clientId);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: progress,
-                        },
-                    ],
-                };
+                const state = getFlowState(clientId);
+                if (!state) {
+                    return { content: [{ type: 'text', text: 'No active flow. Start with start_intake.' }] };
+                }
+                return toMcpContent(formatFlowProgress(state));
             }
             default:
                 return {
@@ -1029,20 +783,6 @@ Start by using 'start_intake' to begin the session. The flow will guide you from
             throw new Error(`Unknown prompt: ${name}`);
     }
 });
-function getComplexityInterpretation(level) {
-    switch (level) {
-        case 'simple':
-            return 'Standard return with W-2 income and basic deductions. Quick appointment expected.';
-        case 'moderate':
-            return 'Multiple income sources or itemized deductions. May require additional documentation.';
-        case 'complex':
-            return 'Business income, rental properties, or investments. Requires experienced tax professional.';
-        case 'expert':
-            return 'Advanced situations like foreign accounts, crypto, or audit representation. Requires specialist.';
-        default:
-            return 'Unknown complexity level';
-    }
-}
 // Start the server
 async function main() {
     const transport = new StdioServerTransport();

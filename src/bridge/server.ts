@@ -37,6 +37,40 @@ import {
 import { db } from '../database/index.js';
 import { chat, resetChatSession } from '../chatgpt/chatEngine.js';
 
+// UI Formatters
+import {
+  formatIntakeStart,
+  formatIntakeResponse,
+  formatIntakeProgress,
+  formatClientSummary,
+} from '../ui/formatters/intake.js';
+import {
+  formatDocumentChecklist as formatDocChecklistUI,
+  formatDocumentCollected,
+  formatPendingDocuments,
+} from '../ui/formatters/checklist.js';
+import {
+  formatComplexityScore,
+  formatRoutingResult,
+  formatTaxProRecommendations,
+  formatAppointmentEstimate as formatEstimateUI,
+  formatAppointmentCreated,
+  formatTaxProList,
+  formatClientProfile,
+} from '../ui/formatters/routing.js';
+import {
+  formatRemindersCreated,
+  formatRemindersList,
+  formatReminderSent,
+  formatNotificationSent,
+} from '../ui/formatters/reminders.js';
+import type { UIResponse } from '../ui/types.js';
+
+/** Wrap a UIResponse into the MCP content block format. */
+function toMcpContent(uiResp: UIResponse): { content: Array<{ type: string; text: string }> } {
+  return { content: [{ type: 'text', text: JSON.stringify(uiResp, null, 2) }] };
+}
+
 // Get __dirname in ESM
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -409,54 +443,73 @@ const mcpTools = [
   { name: 'get_tax_pro_recommendations', description: 'Get list of recommended tax professionals for a client based on their tax situation', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'] } },
 ];
 
-// Handle MCP tool calls
+// Handle MCP tool calls — returns structured UIResponse via formatters
 function handleToolCall(name: string, args: Record<string, unknown>): { content: Array<{ type: string; text: string }> } {
   try {
     switch (name) {
       case 'start_intake': {
         const result = startIntakeSession(args?.clientId as string | undefined);
-        return { content: [{ type: 'text', text: `Session started!\nSession ID: ${result.session.id}\nClient ID: ${result.client.id}\n\n${result.nextQuestion}` }] };
+        return toMcpContent(formatIntakeStart(result));
       }
+
       case 'process_intake_response': {
         const result = processIntakeResponse(args.sessionId as string, args.answer as string);
-        if (result.intakeCompleted) {
-          return { content: [{ type: 'text', text: `Intake complete! Client ID: ${result.client?.id}` }] };
-        }
-        return { content: [{ type: 'text', text: result.nextQuestion || 'Processing...' }] };
+        const intakeProgress = getIntakeProgress(args.sessionId as string);
+        return toMcpContent(formatIntakeResponse(result, args.sessionId as string, intakeProgress ? {
+          completedSteps: intakeProgress.completedSteps,
+          totalSteps: intakeProgress.totalSteps,
+          percentComplete: intakeProgress.percentComplete,
+        } : undefined));
       }
+
       case 'get_intake_progress': {
         const progress = getIntakeProgress(args.sessionId as string);
-        return { content: [{ type: 'text', text: JSON.stringify(progress, null, 2) }] };
+        return toMcpContent(formatIntakeProgress(progress, args.sessionId as string));
       }
+
       case 'get_client_summary': {
-        const summary = getIntakeSummary(args.clientId as string);
-        return { content: [{ type: 'text', text: summary }] };
+        const clientId = args.clientId as string;
+        const summary = getIntakeSummary(clientId);
+        const client = db.getClient(clientId);
+        if (!client) {
+          return { content: [{ type: 'text', text: 'Client not found' }] };
+        }
+        return toMcpContent(formatClientSummary(client, summary));
       }
+
       case 'generate_document_checklist': {
         const checklist = generateDocumentChecklist(args.clientId as string);
-        return { content: [{ type: 'text', text: formatChecklistForDisplay(checklist) }] };
+        return toMcpContent(formatDocChecklistUI(checklist, 'generate_document_checklist'));
       }
+
       case 'get_pending_documents': {
         const pending = getPendingDocuments(args.clientId as string);
-        return { content: [{ type: 'text', text: JSON.stringify(pending, null, 2) }] };
+        return toMcpContent(formatPendingDocuments(pending, args.clientId as string));
       }
+
       case 'route_to_tax_pro': {
-        const result = routeClientToTaxPro(args.clientId as string);
-        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+        const clientId = args.clientId as string;
+        const result = routeClientToTaxPro(clientId);
+        return toMcpContent(formatRoutingResult(result, clientId));
       }
+
       case 'get_appointment_estimate': {
         const estimate = getAppointmentEstimate(args.clientId as string);
-        return { content: [{ type: 'text', text: estimate.message }] };
+        return toMcpContent(formatEstimateUI(estimate, args.clientId as string));
       }
+
       case 'create_appointment': {
+        const clientId = args.clientId as string;
         const appointment = createAppointment(
-          args.clientId as string,
+          clientId,
           args.taxProId as string,
           new Date(args.scheduledAt as string),
           (args.type as 'virtual' | 'in_person') || 'virtual'
         );
-        return { content: [{ type: 'text', text: `✅ Appointment booked!\n\nAppointment ID: ${appointment.id}\nScheduled: ${appointment.scheduledAt.toISOString()}\nTax Professional: ${appointment.taxProId}\nDuration: ${appointment.duration} minutes\nStatus: ${appointment.status}` }] };
+        const taxPro = db.getTaxPro(args.taxProId as string) ?? null;
+        return toMcpContent(formatAppointmentCreated(appointment, taxPro, 0));
       }
+
       case 'create_reminder': {
         // Use batch reminder which creates a reminder for all pending documents
         const reminder = createBatchDocumentReminder(
@@ -464,40 +517,49 @@ function handleToolCall(name: string, args: Record<string, unknown>): { content:
           args.appointmentId as string || 'pending'
         );
         if (!reminder) {
-          return { content: [{ type: 'text', text: '📋 No pending documents found for this client - no reminder needed!' }] };
+          return { content: [{ type: 'text', text: '📋 No pending documents found for this client — no reminder needed!' }] };
         }
-        return { content: [{ type: 'text', text: `✅ Reminder created!\n\nReminder ID: ${reminder.id}\nType: ${reminder.type}\nScheduled for: ${reminder.scheduledFor}\nChannel: ${reminder.channel}\nDocuments: ${reminder.documentIds?.length || 0} pending` }] };
+        return toMcpContent(formatRemindersCreated([reminder], args.clientId as string));
       }
+
       case 'send_reminder': {
         const result = sendReminder(args.reminderId as string);
-        return { content: [{ type: 'text', text: result.success ? `✅ ${result.message}` : `❌ ${result.message}` }] };
+        return toMcpContent(formatReminderSent(result, args.reminderId as string));
       }
+
       case 'get_client_reminders': {
         const reminders = getClientReminders(args.clientId as string);
-        return { content: [{ type: 'text', text: formatRemindersForDisplay(reminders) }] };
+        return toMcpContent(formatRemindersList(reminders, args.clientId as string));
       }
+
       case 'send_client_notification': {
-        // Simulate sending notification (in production, this would integrate with email/SMS service)
         const notificationId = crypto.randomUUID();
         const notification = {
           id: notificationId,
-          clientId: args.clientId,
-          subject: args.subject,
-          message: args.message,
-          type: args.notificationType || 'email',
+          clientId: args.clientId as string,
+          subject: args.subject as string,
+          message: args.message as string,
+          type: (args.notificationType as string) || 'email',
           sentAt: new Date().toISOString(),
-          status: 'sent'
         };
-        return { content: [{ type: 'text', text: `✅ Notification sent!\n\nNotification ID: ${notification.id}\nTo: Client ${notification.clientId}\nSubject: ${notification.subject}\nType: ${notification.type}\nSent at: ${notification.sentAt}\n\nMessage:\n${notification.message}` }] };
+        return toMcpContent(formatNotificationSent(notification));
       }
+
       case 'mark_document_collected': {
         const result = markDocumentCollected(args.clientId as string, args.documentId as string);
-        return { content: [{ type: 'text', text: `✅ Document marked as collected!\n\nDocument ID: ${args.documentId}\nClient: ${args.clientId}\nStatus: Collected` }] };
+        return toMcpContent(formatDocumentCollected(result, args.clientId as string, args.documentId as string));
       }
+
       case 'get_tax_pro_recommendations': {
-        const recommendations = getTaxProRecommendations(args.clientId as string);
-        return { content: [{ type: 'text', text: recommendations }] };
+        const clientId = args.clientId as string;
+        const client = db.getClient(clientId);
+        if (!client) {
+          return { content: [{ type: 'text', text: 'Client not found' }] };
+        }
+        const { taxPro, reason, alternates } = findBestTaxPro(client);
+        return toMcpContent(formatTaxProRecommendations(clientId, taxPro, reason, alternates));
       }
+
       default:
         return { content: [{ type: 'text', text: `Unknown tool: ${name}` }] };
     }
