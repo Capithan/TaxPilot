@@ -1,0 +1,917 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TaxPilot — Local Demo</title>
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --primary: #10a37f;
+      --primary-hover: #0d8c6d;
+      --accent: #7c3aed;
+      --bg: #f7f7f8;
+      --surface: #ffffff;
+      --surface-alt: #f4f4f5;
+      --text: #1a1a1a;
+      --text-muted: #6e6e80;
+      --border: #e5e5e7;
+      --success: #16a34a;
+      --success-bg: #f0fdf4;
+      --warning: #d97706;
+      --warning-bg: #fffbeb;
+      --error: #dc2626;
+      --error-bg: #fef2f2;
+      --info: #2563eb;
+      --info-bg: #eff6ff;
+      --radius: 12px;
+      --shadow: 0 1px 3px rgba(0,0,0,0.08);
+      --shadow-lg: 0 4px 12px rgba(0,0,0,0.12);
+    }
+
+    body {
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      overflow: hidden;
+    }
+
+    /* ── Sidebar ──────────────────────────────────────── */
+    .sidebar {
+      width: 280px;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+
+    .sidebar-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .sidebar-header .logo-icon {
+      width: 36px; height: 36px;
+      background: var(--primary);
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      color: white; font-size: 20px;
+    }
+
+    .sidebar-header h1 { font-size: 1.15rem; font-weight: 700; }
+    .sidebar-header span { font-size: 0.75rem; color: var(--text-muted); display: block; }
+
+    .sidebar-section {
+      padding: 12px 16px 4px;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    .sidebar-tools {
+      flex: 1;
+      overflow-y: auto;
+      padding: 4px 8px;
+    }
+
+    .tool-btn {
+      width: 100%;
+      text-align: left;
+      padding: 8px 12px;
+      border: none;
+      background: transparent;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.82rem;
+      color: var(--text);
+      transition: background 0.15s;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .tool-btn:hover { background: var(--surface-alt); }
+    .tool-btn .tool-icon { font-size: 1rem; width: 20px; text-align: center; }
+
+    .sidebar-state {
+      padding: 12px 16px;
+      border-top: 1px solid var(--border);
+      font-size: 0.78rem;
+      color: var(--text-muted);
+    }
+    .sidebar-state .state-row { display: flex; justify-content: space-between; margin-bottom: 4px; }
+    .sidebar-state .state-val { font-weight: 600; color: var(--text); font-family: monospace; font-size: 0.75rem; }
+
+    /* ── Main Panel ───────────────────────────────────── */
+    .main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+
+    .topbar {
+      padding: 12px 24px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .topbar h2 { font-size: 1rem; font-weight: 600; }
+    .topbar .badge {
+      font-size: 0.72rem;
+      padding: 3px 10px;
+      border-radius: 20px;
+      background: var(--success-bg);
+      color: var(--success);
+      font-weight: 600;
+    }
+
+    /* ── Response Feed ────────────────────────────────── */
+    .feed {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px;
+    }
+
+    .feed-inner {
+      max-width: 860px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    /* ── Welcome ──────────────────────────────────────── */
+    .welcome {
+      text-align: center;
+      padding: 80px 20px 40px;
+    }
+    .welcome-icon {
+      width: 72px; height: 72px;
+      background: linear-gradient(135deg, var(--primary), #059669);
+      border-radius: 18px;
+      display: flex; align-items: center; justify-content: center;
+      margin: 0 auto 20px;
+      font-size: 36px; color: white;
+    }
+    .welcome h2 { font-size: 1.6rem; margin-bottom: 8px; }
+    .welcome p { color: var(--text-muted); max-width: 460px; margin: 0 auto 28px; line-height: 1.6; }
+    .welcome-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+    .welcome-actions button {
+      padding: 10px 20px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      cursor: pointer;
+      font-size: 0.88rem;
+      transition: all 0.15s;
+    }
+    .welcome-actions button:hover { border-color: var(--primary); color: var(--primary); }
+    .welcome-actions button.cta {
+      background: var(--primary);
+      color: white;
+      border-color: var(--primary);
+    }
+    .welcome-actions button.cta:hover { background: var(--primary-hover); }
+
+    /* ── UIResponse Card Block ────────────────────────── */
+    .ui-block {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      box-shadow: var(--shadow);
+      animation: fadeIn 0.3s ease;
+    }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+    .ui-block-header {
+      padding: 16px 20px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .ui-block-header h3 {
+      font-size: 1.15rem;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .ui-block-header .subtitle {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    /* Banner */
+    .ui-banner {
+      padding: 10px 20px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.88rem;
+      font-weight: 500;
+    }
+    .ui-banner.success { background: var(--success-bg); color: var(--success); }
+    .ui-banner.error   { background: var(--error-bg);   color: var(--error); }
+    .ui-banner.warning { background: var(--warning-bg); color: var(--warning); }
+    .ui-banner.info    { background: var(--info-bg);    color: var(--info); }
+
+    /* Progress bar */
+    .ui-progress {
+      padding: 12px 20px;
+    }
+    .ui-progress-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+    .ui-progress-bar {
+      height: 8px;
+      background: var(--surface-alt);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .ui-progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--primary), #059669);
+      border-radius: 4px;
+      transition: width 0.5s ease;
+    }
+
+    /* Card (inner) */
+    .ui-card {
+      margin: 12px 20px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .ui-card-header {
+      padding: 12px 16px;
+      background: var(--surface-alt);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .ui-card-title {
+      font-size: 0.95rem;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .ui-badge {
+      font-size: 0.7rem;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .ui-badge.success { background: var(--success-bg); color: var(--success); }
+    .ui-badge.error   { background: var(--error-bg);   color: var(--error); }
+    .ui-badge.warning { background: var(--warning-bg); color: var(--warning); }
+    .ui-badge.info    { background: var(--info-bg);    color: var(--info); }
+    .ui-badge.neutral { background: var(--surface-alt); color: var(--text-muted); }
+
+    .ui-card-body { padding: 12px 16px; }
+
+    .ui-field {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      padding: 6px 0;
+      border-bottom: 1px solid #f3f3f4;
+      font-size: 0.85rem;
+    }
+    .ui-field:last-child { border-bottom: none; }
+    .ui-field-label { color: var(--text-muted); display: flex; align-items: center; gap: 4px; }
+    .ui-field-value { font-weight: 500; text-align: right; max-width: 60%; word-break: break-word; }
+
+    .ui-highlight {
+      margin: 8px 0;
+      padding: 10px 14px;
+      background: var(--info-bg);
+      border-left: 3px solid var(--info);
+      border-radius: 0 6px 6px 0;
+      font-size: 0.85rem;
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }
+
+    .ui-card-footer {
+      padding: 8px 16px;
+      background: var(--surface-alt);
+      font-size: 0.78rem;
+      color: var(--text-muted);
+    }
+
+    /* Sections */
+    .ui-section {
+      margin: 12px 20px;
+    }
+    .ui-section-title {
+      font-size: 0.88rem;
+      font-weight: 600;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .ui-section-counter {
+      font-size: 0.72rem;
+      background: var(--surface-alt);
+      padding: 2px 8px;
+      border-radius: 10px;
+      color: var(--text-muted);
+    }
+    .ui-list-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      font-size: 0.85rem;
+      border-radius: 6px;
+      margin-bottom: 2px;
+    }
+    .ui-list-item:hover { background: var(--surface-alt); }
+    .ui-list-item .status-icon { width: 18px; text-align: center; }
+    .ui-list-item .item-text { flex: 1; }
+    .ui-list-item .item-action-btn {
+      font-size: 0.72rem;
+      padding: 2px 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+    .ui-list-item:hover .item-action-btn { opacity: 1; }
+    .ui-list-item .item-action-btn:hover { border-color: var(--primary); color: var(--primary); }
+
+    /* Action buttons */
+    .ui-actions {
+      padding: 12px 20px 16px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .ui-action-btn {
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+    }
+    .ui-action-btn:hover { border-color: var(--primary); color: var(--primary); }
+    .ui-action-btn.primary {
+      background: var(--primary);
+      color: white;
+      border-color: var(--primary);
+    }
+    .ui-action-btn.primary:hover { background: var(--primary-hover); }
+    .ui-action-btn.danger {
+      background: var(--error);
+      color: white;
+      border-color: var(--error);
+    }
+    .ui-action-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* ── Tool meta / raw JSON toggle ──────────────────── */
+    .ui-meta {
+      padding: 8px 20px 12px;
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-top: 1px solid var(--border);
+    }
+    .ui-meta button {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      text-decoration: underline;
+      font-size: 0.72rem;
+    }
+    .ui-raw {
+      display: none;
+      padding: 12px 20px;
+      background: #1e1e1e;
+      color: #d4d4d4;
+      font-family: 'Cascadia Code', 'Consolas', monospace;
+      font-size: 0.75rem;
+      max-height: 300px;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .ui-raw.open { display: block; }
+
+    /* ── Input bar ────────────────────────────────────── */
+    .input-bar {
+      padding: 16px 24px;
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+    }
+    .input-row {
+      max-width: 860px;
+      margin: 0 auto;
+      display: flex;
+      gap: 8px;
+    }
+    .input-row input {
+      flex: 1;
+      padding: 10px 14px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 0.9rem;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .input-row input:focus { border-color: var(--primary); }
+    .input-row button {
+      padding: 10px 20px;
+      background: var(--primary);
+      color: white;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 0.88rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .input-row button:hover { background: var(--primary-hover); }
+    .input-hint {
+      max-width: 860px;
+      margin: 6px auto 0;
+      font-size: 0.72rem;
+      color: var(--text-muted);
+    }
+
+    /* ── Loading spinner ──────────────────────────────── */
+    .spinner {
+      display: inline-block;
+      width: 16px; height: 16px;
+      border: 2px solid var(--border);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Responsive ───────────────────────────────────── */
+    @media (max-width: 768px) {
+      .sidebar { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Sidebar ──────────────────────────────────────── -->
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <div class="logo-icon">📋</div>
+    <div>
+      <h1>TaxPilot</h1>
+      <span>Local Dev Console</span>
+    </div>
+  </div>
+
+  <div class="sidebar-section">Workflow</div>
+  <div class="sidebar-tools">
+    <button class="tool-btn" onclick="callTool('start_intake')">
+      <span class="tool-icon">▶️</span> Start New Intake
+    </button>
+    <button class="tool-btn" onclick="promptTool('process_intake_response', ['sessionId','answer'])">
+      <span class="tool-icon">💬</span> Process Response
+    </button>
+    <button class="tool-btn" onclick="promptTool('get_intake_progress', ['sessionId'])">
+      <span class="tool-icon">📊</span> Intake Progress
+    </button>
+    <button class="tool-btn" onclick="promptTool('get_client_summary', ['clientId'])">
+      <span class="tool-icon">👤</span> Client Summary
+    </button>
+  </div>
+
+  <div class="sidebar-section">Documents</div>
+  <div class="sidebar-tools">
+    <button class="tool-btn" onclick="promptTool('generate_document_checklist', ['clientId'])">
+      <span class="tool-icon">📋</span> Generate Checklist
+    </button>
+    <button class="tool-btn" onclick="promptTool('get_pending_documents', ['clientId'])">
+      <span class="tool-icon">📄</span> Pending Documents
+    </button>
+    <button class="tool-btn" onclick="promptTool('mark_document_collected', ['clientId','documentId'])">
+      <span class="tool-icon">✅</span> Mark Collected
+    </button>
+  </div>
+
+  <div class="sidebar-section">Routing</div>
+  <div class="sidebar-tools">
+    <button class="tool-btn" onclick="promptTool('route_to_tax_pro', ['clientId'])">
+      <span class="tool-icon">🎯</span> Route to Tax Pro
+    </button>
+    <button class="tool-btn" onclick="promptTool('get_tax_pro_recommendations', ['clientId'])">
+      <span class="tool-icon">👨‍💼</span> Recommendations
+    </button>
+    <button class="tool-btn" onclick="promptTool('get_appointment_estimate', ['clientId'])">
+      <span class="tool-icon">⏱️</span> Time Estimate
+    </button>
+    <button class="tool-btn" onclick="promptTool('create_appointment', ['clientId','taxProId','scheduledAt'])">
+      <span class="tool-icon">📅</span> Book Appointment
+    </button>
+  </div>
+
+  <div class="sidebar-section">Reminders</div>
+  <div class="sidebar-tools">
+    <button class="tool-btn" onclick="promptTool('create_reminder', ['clientId'])">
+      <span class="tool-icon">🔔</span> Create Reminder
+    </button>
+    <button class="tool-btn" onclick="promptTool('get_client_reminders', ['clientId'])">
+      <span class="tool-icon">📬</span> List Reminders
+    </button>
+    <button class="tool-btn" onclick="promptTool('send_reminder', ['reminderId'])">
+      <span class="tool-icon">📤</span> Send Reminder
+    </button>
+    <button class="tool-btn" onclick="promptTool('send_client_notification', ['clientId','subject','message'])">
+      <span class="tool-icon">📧</span> Send Notification
+    </button>
+  </div>
+
+  <div class="sidebar-state" id="sidebarState">
+    <div class="state-row"><span>Session</span><span class="state-val" id="stateSession">—</span></div>
+    <div class="state-row"><span>Client</span><span class="state-val" id="stateClient">—</span></div>
+    <div class="state-row"><span>Tax Pro</span><span class="state-val" id="stateTaxPro">—</span></div>
+  </div>
+</aside>
+
+<!-- ── Main Panel ────────────────────────────────────── -->
+<main class="main">
+  <div class="topbar">
+    <h2 id="topbarTitle">TaxPilot Local Demo</h2>
+    <span class="badge" id="topbarBadge">● Local</span>
+  </div>
+
+  <div class="feed" id="feed">
+    <div class="feed-inner" id="feedInner">
+      <!-- Welcome screen -->
+      <div class="welcome" id="welcome">
+        <div class="welcome-icon">📋</div>
+        <h2>Welcome to TaxPilot</h2>
+        <p>This is your local development console. Every tool returns structured UI components — cards, progress bars, action buttons — rendered in real time, no cloud required.</p>
+        <div class="welcome-actions">
+          <button class="cta" onclick="callTool('start_intake')">▶️  Start Intake Session</button>
+          <button onclick="callTool('get_tax_pro_recommendations', {clientId:'demo'})">👨‍💼  Browse Tax Pros</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="input-bar">
+    <div class="input-row">
+      <input type="text" id="inputField" placeholder="Type an answer to the current intake question…" 
+             onkeydown="if(event.key==='Enter')sendAnswer()">
+      <button onclick="sendAnswer()">Send</button>
+    </div>
+    <div class="input-hint" id="inputHint">Start an intake session to begin the conversation flow.</div>
+  </div>
+</main>
+
+<script>
+// ── State ─────────────────────────────────────────────
+const state = {
+  sessionId: null,
+  clientId: null,
+  taxProId: null,
+  appointmentId: null,
+};
+
+function updateState(data) {
+  if (!data) return;
+  if (data.sessionId) state.sessionId = data.sessionId;
+  if (data.clientId) state.clientId = data.clientId;
+  if (data.taxProId) state.taxProId = data.taxProId;
+  if (data.appointmentId) state.appointmentId = data.appointmentId;
+
+  document.getElementById('stateSession').textContent = state.sessionId ? state.sessionId.slice(0, 8) + '…' : '—';
+  document.getElementById('stateClient').textContent = state.clientId ? state.clientId.slice(0, 8) + '…' : '—';
+  document.getElementById('stateTaxPro').textContent = state.taxProId ? state.taxProId.slice(0, 8) + '…' : '—';
+}
+
+// ── API ───────────────────────────────────────────────
+async function callTool(name, args = {}) {
+  // Auto-fill known state
+  if (!args.sessionId && state.sessionId) args.sessionId = state.sessionId;
+  if (!args.clientId && state.clientId) args.clientId = state.clientId;
+  if (!args.taxProId && state.taxProId) args.taxProId = state.taxProId;
+
+  hideWelcome();
+  const loadingEl = showLoading(name);
+
+  try {
+    const res = await fetch('/api/tools/call', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, args }),
+    });
+    const data = await res.json();
+    loadingEl.remove();
+
+    // Extract state from data payload
+    if (data.data) updateState(data.data);
+    if (data._meta) updateState(data._meta);
+
+    renderUIResponse(data, name);
+    scrollToBottom();
+  } catch (err) {
+    loadingEl.remove();
+    renderError(name, err.message);
+  }
+}
+
+function promptTool(name, fields) {
+  // Auto-fill what we can
+  const args = {};
+  const missing = [];
+
+  for (const f of fields) {
+    if (f === 'sessionId' && state.sessionId) { args.sessionId = state.sessionId; }
+    else if (f === 'clientId' && state.clientId) { args.clientId = state.clientId; }
+    else if (f === 'taxProId' && state.taxProId) { args.taxProId = state.taxProId; }
+    else if (f === 'appointmentId' && state.appointmentId) { args.appointmentId = state.appointmentId; }
+    else { missing.push(f); }
+  }
+
+  if (missing.length === 0) {
+    callTool(name, args);
+    return;
+  }
+
+  // For process_intake_response with only answer missing, focus the input
+  if (name === 'process_intake_response' && missing.length === 1 && missing[0] === 'answer') {
+    document.getElementById('inputField').focus();
+    document.getElementById('inputHint').textContent = 'Type your answer and press Enter.';
+    return;
+  }
+
+  // Quick prompt for missing fields
+  for (const f of missing) {
+    const val = prompt(`Enter ${f}:`);
+    if (val === null) return;
+    args[f] = val;
+  }
+  callTool(name, args);
+}
+
+function sendAnswer() {
+  const input = document.getElementById('inputField');
+  const text = input.value.trim();
+  if (!text) return;
+  if (!state.sessionId) {
+    document.getElementById('inputHint').textContent = '⚠️ No active session. Click "Start Intake Session" first.';
+    return;
+  }
+  input.value = '';
+  // Show user message
+  showUserMessage(text);
+  callTool('process_intake_response', { sessionId: state.sessionId, answer: text });
+}
+
+// ── Rendering ─────────────────────────────────────────
+const feed = document.getElementById('feedInner');
+
+function hideWelcome() {
+  const w = document.getElementById('welcome');
+  if (w) w.style.display = 'none';
+}
+
+function showLoading(toolName) {
+  const el = document.createElement('div');
+  el.className = 'ui-block';
+  el.innerHTML = `<div style="padding:16px 20px;display:flex;align-items:center;gap:10px;color:var(--text-muted);font-size:0.88rem;">
+    <span class="spinner"></span> Calling <strong>${toolName}</strong>…
+  </div>`;
+  feed.appendChild(el);
+  scrollToBottom();
+  return el;
+}
+
+function showUserMessage(text) {
+  const el = document.createElement('div');
+  el.style.cssText = 'display:flex;justify-content:flex-end;';
+  el.innerHTML = `<div style="background:var(--primary);color:white;padding:10px 16px;border-radius:var(--radius) var(--radius) 4px var(--radius);max-width:70%;font-size:0.9rem;line-height:1.5;">${escHtml(text)}</div>`;
+  feed.appendChild(el);
+}
+
+function renderError(toolName, msg) {
+  const el = document.createElement('div');
+  el.className = 'ui-block';
+  el.innerHTML = `<div class="ui-banner error">❌ ${toolName} failed: ${escHtml(msg)}</div>`;
+  feed.appendChild(el);
+}
+
+function renderUIResponse(data, toolName) {
+  // Handle raw / non-structured responses
+  if (data.raw) {
+    const el = document.createElement('div');
+    el.className = 'ui-block';
+    el.innerHTML = `<div style="padding:16px 20px;white-space:pre-wrap;font-size:0.88rem;">${escHtml(data.raw)}</div>`;
+    feed.appendChild(el);
+    return;
+  }
+
+  const el = document.createElement('div');
+  el.className = 'ui-block';
+  let html = '';
+
+  // Header
+  if (data.title) {
+    html += `<div class="ui-block-header"><h3>${escHtml(data.title)}</h3>`;
+    if (data.subtitle) html += `<div class="subtitle">${escHtml(data.subtitle)}</div>`;
+    html += '</div>';
+  }
+
+  // Banner
+  if (data.banner) {
+    const v = data.banner.variant || 'info';
+    html += `<div class="ui-banner ${v}">${data.banner.icon || ''} ${escHtml(data.banner.text)}</div>`;
+  }
+
+  // Progress
+  if (data.progress) {
+    const pct = data.progress.total > 0 ? Math.round((data.progress.current / data.progress.total) * 100) : 0;
+    html += `<div class="ui-progress">
+      <div class="ui-progress-label"><span>${escHtml(data.progress.label || '')}</span><span>${pct}%</span></div>
+      <div class="ui-progress-bar"><div class="ui-progress-fill" style="width:${pct}%"></div></div>
+    </div>`;
+  }
+
+  // Cards
+  if (data.cards && data.cards.length) {
+    for (const card of data.cards) {
+      html += renderCard(card);
+    }
+  }
+
+  // Sections
+  if (data.sections && data.sections.length) {
+    for (const sec of data.sections) {
+      html += renderSection(sec);
+    }
+  }
+
+  // Actions
+  if (data.actions && data.actions.length) {
+    html += '<div class="ui-actions">';
+    for (const act of data.actions) {
+      html += renderActionButton(act);
+    }
+    html += '</div>';
+  }
+
+  // Meta + raw toggle
+  const ts = data._meta?.timestamp ? new Date(data._meta.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
+  const raw = JSON.stringify(data, null, 2);
+  const rawId = 'raw-' + Date.now() + Math.random().toString(36).slice(2, 6);
+  html += `<div class="ui-meta">
+    <span>${escHtml(data._meta?.toolName || toolName)} · ${ts}</span>
+    <button onclick="document.getElementById('${rawId}').classList.toggle('open')">Toggle JSON</button>
+  </div>`;
+  html += `<div class="ui-raw" id="${rawId}">${escHtml(raw)}</div>`;
+
+  el.innerHTML = html;
+  feed.appendChild(el);
+
+  // Update input hint based on context
+  if (data.data?.nextQuestion || data.cards?.[0]?.highlight) {
+    const q = data.data?.nextQuestion || data.cards?.[0]?.highlight;
+    document.getElementById('inputHint').textContent = q;
+    document.getElementById('inputField').focus();
+  }
+}
+
+function renderCard(card) {
+  let h = '<div class="ui-card">';
+  h += '<div class="ui-card-header">';
+  h += `<span class="ui-card-title">${card.icon || ''} ${escHtml(card.title)}</span>`;
+  if (card.badge) {
+    const v = card.badge.variant || 'neutral';
+    h += `<span class="ui-badge ${v}">${card.badge.icon || ''} ${escHtml(card.badge.text)}</span>`;
+  }
+  h += '</div>';
+  h += '<div class="ui-card-body">';
+
+  // Fields
+  if (card.fields && card.fields.length) {
+    for (const f of card.fields) {
+      h += `<div class="ui-field">
+        <span class="ui-field-label">${f.icon || ''} ${escHtml(f.label)}</span>
+        <span class="ui-field-value">${escHtml(String(f.value))}</span>
+      </div>`;
+    }
+  }
+
+  // Sections inside card
+  if (card.sections && card.sections.length) {
+    for (const sec of card.sections) {
+      h += renderSection(sec);
+    }
+  }
+
+  // Highlight
+  if (card.highlight) {
+    h += `<div class="ui-highlight">${escHtml(card.highlight)}</div>`;
+  }
+
+  h += '</div>'; // close body
+
+  // Card-level actions
+  if (card.actions && card.actions.length) {
+    h += '<div class="ui-actions" style="padding:8px 16px 12px;">';
+    for (const act of card.actions) {
+      h += renderActionButton(act);
+    }
+    h += '</div>';
+  }
+
+  // Footer
+  if (card.footer) {
+    h += `<div class="ui-card-footer">${escHtml(card.footer)}</div>`;
+  }
+
+  h += '</div>';
+  return h;
+}
+
+function renderSection(sec) {
+  let h = '<div class="ui-section">';
+  h += '<div class="ui-section-title">';
+  if (sec.icon) h += sec.icon + ' ';
+  h += escHtml(sec.title);
+  if (sec.counter) h += ` <span class="ui-section-counter">${escHtml(sec.counter)}</span>`;
+  h += '</div>';
+
+  if (sec.items && sec.items.length) {
+    for (const item of sec.items) {
+      h += '<div class="ui-list-item">';
+      const statusIcon = item.status === 'complete' ? '✅' : item.status === 'pending' ? '⬜' : item.status === 'warning' ? '⚠️' : '•';
+      h += `<span class="status-icon">${statusIcon}</span>`;
+      h += `<span class="item-text">${escHtml(item.text)}</span>`;
+      if (item.actions && item.actions.length) {
+        for (const a of item.actions) {
+          const args = escHtml(JSON.stringify(a.toolArgs || {}));
+          h += `<button class="item-action-btn" onclick='callTool(${JSON.stringify(a.toolName)}, ${JSON.stringify(a.toolArgs || {})})'>${a.icon || ''} ${escHtml(a.label)}</button>`;
+        }
+      }
+      h += '</div>';
+    }
+  }
+  h += '</div>';
+  return h;
+}
+
+function renderActionButton(act) {
+  const style = act.style || 'secondary';
+  const argsJson = JSON.stringify(act.toolArgs || {});
+  return `<button class="ui-action-btn ${style}" onclick='callTool(${JSON.stringify(act.toolName)}, ${JSON.stringify(act.toolArgs || {})})'>${act.icon || ''} ${escHtml(act.label)}</button>`;
+}
+
+// ── Helpers ───────────────────────────────────────────
+function escHtml(s) {
+  if (!s) return '';
+  const el = document.createElement('span');
+  el.textContent = String(s);
+  return el.innerHTML;
+}
+
+function scrollToBottom() {
+  const f = document.getElementById('feed');
+  requestAnimationFrame(() => { f.scrollTop = f.scrollHeight; });
+}
+</script>
+
+</body>
+</html>

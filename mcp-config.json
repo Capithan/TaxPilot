@@ -2,7 +2,7 @@
   "mcpServers": {
     "tax-intake": {
       "command": "node",
-      "args": ["C:/Projects/ChatGPT APPS/tax-intake-mcp/dist/index.js"],
+      "args": ["C:/Projects/TaxPilot/dist/index.js"],
       "env": {}
     }
   }

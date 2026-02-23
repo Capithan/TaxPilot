@@ -354,6 +354,26 @@ app.get('/tax-pros', (_req, res) => {
     const pros = db.getAllTaxPros();
     res.json(pros);
 });
+// ── Local Dev REST API ─────────────────────────────────
+// Simple REST endpoint so the local UI can call any MCP tool by name.
+app.post('/api/tools/call', (req, res) => {
+    const { name, args } = req.body;
+    if (!name) {
+        return res.status(400).json({ error: 'Missing tool name' });
+    }
+    const result = handleToolCall(name, args || {});
+    // The first content block is the JSON-stringified UIResponse
+    try {
+        const uiResponse = JSON.parse(result.content[0].text);
+        return res.json(uiResponse);
+    }
+    catch {
+        return res.json({ raw: result.content[0].text });
+    }
+});
+app.get('/api/tools', (_req, res) => {
+    res.json(mcpTools);
+});
 // Define available MCP tools
 const mcpTools = [
     { name: 'start_intake', description: 'Start a new client intake session. DEMO MODE: Collects ALL data directly including SSN, bank details, W-2 info, and AGI. No external portals.', inputSchema: { type: 'object', properties: { clientId: { type: 'string', description: 'Optional existing client ID' } } } },
@@ -753,7 +773,8 @@ function startSelfPing(port) {
     console.log(`[Self-ping] Enabled - pinging ${pingUrl} every 4 minutes`);
 }
 // Only start server if running directly (not imported)
-const isMainModule = import.meta.url === `file://${process.argv[1].replace(/\\/g, '/')}`;
+const argv1 = process.argv[1]?.replace(/\\/g, '/');
+const isMainModule = import.meta.url === `file://${argv1}` || import.meta.url === `file:///${argv1}`;
 if (isMainModule) {
     const PORT = process.env.PORT || 3001;
     app.listen(PORT, () => {

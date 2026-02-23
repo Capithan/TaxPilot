@@ -424,23 +424,44 @@ app.get('/tax-pros', (_req: Request, res: Response) => {
   res.json(pros);
 });
 
-// Define available MCP tools
+// ── Local Dev REST API ─────────────────────────────────
+// Simple REST endpoint so the local UI can call any MCP tool by name.
+app.post('/api/tools/call', (req: Request, res: Response) => {
+  const { name, args } = req.body as { name: string; args?: Record<string, unknown> };
+  if (!name) {
+    return res.status(400).json({ error: 'Missing tool name' });
+  }
+  const result = handleToolCall(name, args || {});
+  // The first content block is the JSON-stringified UIResponse
+  try {
+    const uiResponse = JSON.parse(result.content[0].text);
+    return res.json(uiResponse);
+  } catch {
+    return res.json({ raw: result.content[0].text });
+  }
+});
+
+app.get('/api/tools', (_req: Request, res: Response) => {
+  res.json(mcpTools);
+});
+
+// Define available MCP tools with annotations (required by OpenAI Apps SDK)
 const mcpTools = [
-  { name: 'start_intake', description: 'Start a new client intake session. DEMO MODE: Collects ALL data directly including SSN, bank details, W-2 info, and AGI. No external portals.', inputSchema: { type: 'object', properties: { clientId: { type: 'string', description: 'Optional existing client ID' } } } },
-  { name: 'process_intake_response', description: 'Process client response during intake. Accepts ALL information directly: SSN, DOB, bank routing/account numbers, W-2 details, prior year AGI, etc. No redirects to external systems.', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, answer: { type: 'string', description: 'Client response - can include any data: SSN, bank info, W-2 details, etc.' } }, required: ['sessionId', 'answer'] } },
-  { name: 'get_intake_progress', description: 'Get intake session progress', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
-  { name: 'get_client_summary', description: 'Get complete client summary including all collected information', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'] } },
-  { name: 'generate_document_checklist', description: 'Generate personalized document checklist based on client tax situation', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'] } },
-  { name: 'get_pending_documents', description: 'Get list of documents still needed from client', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'] } },
-  { name: 'route_to_tax_pro', description: 'Route client to the most appropriate tax professional based on their complexity and needs', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'] } },
-  { name: 'get_appointment_estimate', description: 'Estimate appointment duration based on client complexity and preparation level', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'] } },
-  { name: 'create_appointment', description: 'Create and book an appointment for a client with a tax professional', inputSchema: { type: 'object', properties: { clientId: { type: 'string', description: 'Client ID' }, taxProId: { type: 'string', description: 'Tax professional ID (from route_to_tax_pro)' }, scheduledAt: { type: 'string', description: 'Appointment time in ISO format (e.g., 2026-01-20T10:00:00)' }, type: { type: 'string', enum: ['virtual', 'in_person'], description: 'Appointment type (default: virtual)' } }, required: ['clientId', 'taxProId', 'scheduledAt'] } },
-  { name: 'create_reminder', description: 'Create reminders for a client about all pending documents', inputSchema: { type: 'object', properties: { clientId: { type: 'string' }, appointmentId: { type: 'string', description: 'Optional appointment ID to link reminders to' } }, required: ['clientId'] } },
-  { name: 'send_reminder', description: 'Send a reminder notification to a client (simulated in demo mode)', inputSchema: { type: 'object', properties: { reminderId: { type: 'string' } }, required: ['reminderId'] } },
-  { name: 'get_client_reminders', description: 'Get all reminders for a client', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'] } },
-  { name: 'send_client_notification', description: 'Send a custom notification/email to a client (simulated in demo mode)', inputSchema: { type: 'object', properties: { clientId: { type: 'string' }, subject: { type: 'string' }, message: { type: 'string' }, notificationType: { type: 'string', enum: ['email', 'sms'], description: 'Notification channel' } }, required: ['clientId', 'subject', 'message'] } },
-  { name: 'mark_document_collected', description: 'Mark a document as collected/received from client', inputSchema: { type: 'object', properties: { clientId: { type: 'string' }, documentId: { type: 'string' } }, required: ['clientId', 'documentId'] } },
-  { name: 'get_tax_pro_recommendations', description: 'Get list of recommended tax professionals for a client based on their tax situation', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'] } },
+  { name: 'start_intake', description: 'Start a new client intake session. DEMO MODE: Collects ALL data directly including SSN, bank details, W-2 info, and AGI. No external portals.', inputSchema: { type: 'object', properties: { clientId: { type: 'string', description: 'Optional existing client ID' } }, additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false } },
+  { name: 'process_intake_response', description: 'Process client response during intake. Accepts ALL information directly: SSN, DOB, bank routing/account numbers, W-2 details, prior year AGI, etc. No redirects to external systems.', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, answer: { type: 'string', description: 'Client response - can include any data: SSN, bank info, W-2 details, etc.' } }, required: ['sessionId', 'answer'], additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false } },
+  { name: 'get_intake_progress', description: 'Get intake session progress', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'], additionalProperties: false }, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false } },
+  { name: 'get_client_summary', description: 'Get complete client summary including all collected information', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'], additionalProperties: false }, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false } },
+  { name: 'generate_document_checklist', description: 'Generate personalized document checklist based on client tax situation', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'], additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false } },
+  { name: 'get_pending_documents', description: 'Get list of documents still needed from client', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'], additionalProperties: false }, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false } },
+  { name: 'route_to_tax_pro', description: 'Route client to the most appropriate tax professional based on their complexity and needs', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'], additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false } },
+  { name: 'get_appointment_estimate', description: 'Estimate appointment duration based on client complexity and preparation level', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'], additionalProperties: false }, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false } },
+  { name: 'create_appointment', description: 'Create and book an appointment for a client with a tax professional', inputSchema: { type: 'object', properties: { clientId: { type: 'string', description: 'Client ID' }, taxProId: { type: 'string', description: 'Tax professional ID (from route_to_tax_pro)' }, scheduledAt: { type: 'string', description: 'Appointment time in ISO format (e.g., 2026-01-20T10:00:00)' }, type: { type: 'string', enum: ['virtual', 'in_person'], description: 'Appointment type (default: virtual)' } }, required: ['clientId', 'taxProId', 'scheduledAt'], additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false } },
+  { name: 'create_reminder', description: 'Create reminders for a client about all pending documents', inputSchema: { type: 'object', properties: { clientId: { type: 'string' }, appointmentId: { type: 'string', description: 'Optional appointment ID to link reminders to' } }, required: ['clientId'], additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false } },
+  { name: 'send_reminder', description: 'Send a reminder notification to a client (simulated in demo mode)', inputSchema: { type: 'object', properties: { reminderId: { type: 'string' } }, required: ['reminderId'], additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true } },
+  { name: 'get_client_reminders', description: 'Get all reminders for a client', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'], additionalProperties: false }, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false } },
+  { name: 'send_client_notification', description: 'Send a custom notification/email to a client (simulated in demo mode)', inputSchema: { type: 'object', properties: { clientId: { type: 'string' }, subject: { type: 'string' }, message: { type: 'string' }, notificationType: { type: 'string', enum: ['email', 'sms'], description: 'Notification channel' } }, required: ['clientId', 'subject', 'message'], additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true } },
+  { name: 'mark_document_collected', description: 'Mark a document as collected/received from client', inputSchema: { type: 'object', properties: { clientId: { type: 'string' }, documentId: { type: 'string' } }, required: ['clientId', 'documentId'], additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false } },
+  { name: 'get_tax_pro_recommendations', description: 'Get list of recommended tax professionals for a client based on their tax situation', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'], additionalProperties: false }, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false } },
 ];
 
 // Handle MCP tool calls — returns structured UIResponse via formatters
@@ -596,6 +617,8 @@ app.post('/sse', (req: Request, res: Response) => {
   // Handle initialize request
   if (method === 'initialize') {
     const sessionId = crypto.randomUUID();
+    // Echo the client's protocol version if provided, default to latest spec
+    const clientVersion = params?.protocolVersion || '2025-03-26';
     
     // Return JSON response with capabilities
     res.setHeader('Content-Type', 'application/json');
@@ -604,14 +627,14 @@ app.post('/sse', (req: Request, res: Response) => {
       jsonrpc: '2.0',
       id,
       result: {
-        protocolVersion: params?.protocolVersion || '2024-11-05',
+        protocolVersion: clientVersion,
         serverInfo: { name: 'tax-intake-mcp', version: '1.0.0' },
         capabilities: { 
           tools: { listChanged: false }
         }
       }
     });
-    console.log(`MCP session initialized: ${sessionId}`);
+    console.log(`MCP session initialized: ${sessionId} (protocol: ${clientVersion})`);
     return;
   }
   
@@ -707,18 +730,6 @@ app.get('/sse', (req: Request, res: Response) => {
   res.write(`event: endpoint\n`);
   res.write(`data: ${messagesUrl}\n\n`);
   
-  // Send server info
-  const serverInfo = {
-    jsonrpc: '2.0',
-    method: 'notifications/initialized',
-    params: {
-      serverInfo: { name: 'tax-intake-mcp', version: '1.0.0' },
-      capabilities: { tools: {} }
-    }
-  };
-  res.write(`event: message\n`);
-  res.write(`data: ${JSON.stringify(serverInfo)}\n\n`);
-  
   // Keep-alive ping every 10 seconds (more frequent for ChatGPT)
   const pingInterval = setInterval(() => {
     if (!res.writableEnded) {
@@ -767,12 +778,17 @@ app.post('/messages', (req: Request, res: Response) => {
         jsonrpc: '2.0',
         id,
         result: {
-          protocolVersion: '2024-11-05',
+          protocolVersion: params?.protocolVersion || '2025-03-26',
           serverInfo: { name: 'tax-intake-mcp', version: '1.0.0' },
-          capabilities: { tools: {} }
+          capabilities: { tools: { listChanged: false } }
         }
       };
       break;
+
+    case 'notifications/initialized':
+      // Acknowledgment notification — no response needed
+      res.status(202).send();
+      return;
       
     case 'tools/list':
       response = {
@@ -788,6 +804,22 @@ app.post('/messages', (req: Request, res: Response) => {
         jsonrpc: '2.0',
         id,
         result: toolResult
+      };
+      break;
+
+    case 'resources/list':
+      response = {
+        jsonrpc: '2.0',
+        id,
+        result: { resources: [] }
+      };
+      break;
+
+    case 'prompts/list':
+      response = {
+        jsonrpc: '2.0',
+        id,
+        result: { prompts: [] }
       };
       break;
       
@@ -884,7 +916,8 @@ function startSelfPing(port: number | string) {
 }
 
 // Only start server if running directly (not imported)
-const isMainModule = import.meta.url === `file://${process.argv[1].replace(/\\/g, '/')}`;
+const argv1 = process.argv[1]?.replace(/\\/g, '/');
+const isMainModule = import.meta.url === `file://${argv1}` || import.meta.url === `file:///${argv1}`;
 if (isMainModule) {
   const PORT = process.env.PORT || 3001;
   app.listen(PORT, () => {

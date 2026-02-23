@@ -210,7 +210,7 @@ export function createMcpServer(): Server {
               clientId: { type: 'string', description: 'The client ID' },
               taxProId: { type: 'string', description: 'The tax professional ID' },
               scheduledAt: { type: 'string', description: 'ISO date-time for the appointment' },
-              type: { type: 'string', enum: ['in-person', 'virtual'], description: 'Appointment type' },
+              type: { type: 'string', enum: ['in_person', 'virtual'], description: 'Appointment type' },
             },
             required: ['clientId', 'taxProId', 'scheduledAt'],
           },
