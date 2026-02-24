@@ -32,6 +32,7 @@ const app = express();
 const sseSessions = new Map();
 // Store latest tool result so the widget can render data even without the Apps SDK bridge
 let latestToolResult = null;
+let toolResultVersion = 0;
 // Enhanced CORS for ChatGPT
 app.use(cors({
     origin: true,
@@ -384,16 +385,20 @@ app.get('/api/tools', (_req, res) => {
 // ── MCP Apps Widget Resource URI ────────────────────────────────────────────
 const WIDGET_RESOURCE_URI = 'ui://taxpilot/widget.html';
 const WIDGET_MIME_TYPE = 'text/html;profile=mcp-app';
-/** Read the widget HTML from public/taxpilot-widget.html, optionally embedding tool result data */
+/** Read the widget HTML from public/taxpilot-widget.html, injecting server URL and optional data */
 function readWidgetHtml(embedData) {
     const publicDir = path.join(__dirname, '..', '..', 'public');
     const widgetPath = path.join(publicDir, 'taxpilot-widget.html');
     let html = fs.readFileSync(widgetPath, 'utf-8');
-    // Inject latest tool data so the widget can render even without the postMessage bridge
+    // Always inject the server base URL so the widget can reach the REST API from any iframe origin
+    const host = process.env.WEBSITE_HOSTNAME;
+    const serverUrl = host ? `https://${host}` : '';
+    let injections = `<script>window.__TAXPILOT_SERVER__ = '${serverUrl}';</script>`;
+    // Inject latest tool data if available
     if (embedData) {
-        const dataScript = `<script>window.__TAXPILOT_DATA__ = ${JSON.stringify(embedData)};</script>`;
-        html = html.replace('</head>', `${dataScript}\n</head>`);
+        injections += `\n<script>window.__TAXPILOT_DATA__ = ${JSON.stringify(embedData)};</script>`;
     }
+    html = html.replace('</head>', `${injections}\n</head>`);
     return html;
 }
 // Define available MCP tools with annotations and UI metadata (MCP Apps SDK)
@@ -592,6 +597,7 @@ app.post('/sse', (req, res) => {
         // Store latest result so widget can render via embedded data or REST fallback
         if (toolResult.structuredContent) {
             latestToolResult = toolResult.structuredContent;
+            toolResultVersion++;
         }
         res.setHeader('Content-Type', 'application/json');
         res.json({
@@ -762,6 +768,7 @@ app.post('/messages', (req, res) => {
             // Store latest result so widget can render via embedded data or REST fallback
             if (toolResult.structuredContent) {
                 latestToolResult = toolResult.structuredContent;
+                toolResultVersion++;
             }
             response = {
                 jsonrpc: '2.0',
@@ -831,10 +838,10 @@ app.post('/messages', (req, res) => {
 // ─── Widget Data REST endpoint (fallback when Apps SDK bridge isn't available) ─
 app.get('/api/widget-data', (_req, res) => {
     if (latestToolResult) {
-        res.json(latestToolResult);
+        res.json({ version: toolResultVersion, data: latestToolResult });
     }
     else {
-        res.status(204).send();
+        res.json({ version: 0, data: null });
     }
 });
 // ─── ChatGPT SDK-powered chat API ────────────────────────────────────────────

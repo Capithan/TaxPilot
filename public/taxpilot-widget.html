@@ -1138,46 +1138,64 @@ function esc(text) {
     }
   } else {
     // Standalone mode — bridge handshake failed.
-    // Try rendering embedded data (injected by server in resources/read)
-    // or fetch latest tool result via REST API.
+    // Try embedded data first, then poll the server REST API for tool results.
     const embeddedData = window.__TAXPILOT_DATA__ || null;
     if (embeddedData && (embeddedData.components || embeddedData.screen || embeddedData._ui || embeddedData.data)) {
-      // Render the embedded tool result
       if (embeddedData.components) {
         renderer.renderResponse(embeddedData);
       } else {
         renderer.renderUIResponse(embeddedData);
       }
     } else {
-      // Try REST fallback — fetch latest result from server
-      let fetched = false;
-      try {
-        const baseUrl = window.__TAXPILOT_SERVER__ || window.location.origin || '';
-        if (baseUrl) {
-          const resp = await fetch(`${baseUrl}/api/widget-data`, { mode: 'cors' });
+      // Show loading state while we poll for data
+      renderer.root.innerHTML = `<div class="tp-structured">
+        <div class="tp-text tp-text--heading" style="text-align:center">🟢 TaxPilot</div>
+        <div class="tp-text tp-text--body" style="text-align:center;color:var(--hrb-text-muted)">Connecting to server...</div>
+      </div>`;
+
+      // Poll the REST API for tool results
+      const serverUrl = window.__TAXPILOT_SERVER__ || '';
+      let lastVersion = 0;
+      let pollCount = 0;
+      const maxPolls = 600; // 10 minutes max
+
+      async function pollForData() {
+        if (pollCount >= maxPolls) return;
+        pollCount++;
+        try {
+          const resp = await fetch(`${serverUrl}/api/widget-data`, { mode: 'cors' });
           if (resp.ok) {
-            const data = await resp.json();
-            if (data && (data.components || data.screen || data._ui)) {
+            const json = await resp.json();
+            if (json.version > lastVersion && json.data) {
+              lastVersion = json.version;
+              const data = json.data;
               if (data.components) {
                 renderer.renderResponse(data);
-              } else {
+              } else if (data.type || data.title || data.cards || data._ui) {
                 renderer.renderUIResponse(data);
+              } else {
+                renderer._renderRawData(data);
               }
-              fetched = true;
+            } else if (lastVersion === 0) {
+              // No data yet — update loading message
+              renderer.root.innerHTML = `<div class="tp-structured">
+                <div class="tp-text tp-text--heading" style="text-align:center">🟢 TaxPilot</div>
+                <div class="tp-text tp-text--body" style="text-align:center;color:var(--hrb-text-muted)">Ready — ask the assistant to run a tool and results will appear here.</div>
+              </div>`;
             }
           }
+        } catch (e) {
+          if (pollCount === 1) {
+            console.warn('[Widget] REST poll failed:', e);
+            renderer.root.innerHTML = `<div class="tp-structured">
+              <div class="tp-text tp-text--heading" style="text-align:center">🟢 TaxPilot</div>
+              <div class="tp-text tp-text--body" style="text-align:center;color:var(--hrb-text-muted)">Ready — ask the assistant to run a tool.</div>
+            </div>`;
+          }
         }
-      } catch (e) {
-        console.warn('[Widget] REST fallback failed:', e);
+        setTimeout(pollForData, 1000);
       }
-
-      if (!fetched) {
-        renderer.root.innerHTML = `<div class="tp-structured">
-          <div class="tp-banner tp-banner--info"><span class="tp-banner-icon">ℹ️</span><span class="tp-banner-text">Waiting for tool results...</span></div>
-          <div class="tp-text tp-text--heading">TaxPilot</div>
-          <div class="tp-text tp-text--body">The widget is ready. Use the assistant to run a tool (e.g. "start a client intake") and the results will appear here.</div>
-        </div>`;
-      }
+      pollForData();
     }
   }
 })();
