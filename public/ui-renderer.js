@@ -270,7 +270,7 @@ class TaxPilotRenderer {
         if (c.action) {
           const action = { ...c.action };
           if (action.type === 'tool_call') {
-            action.parameters = { ...(action.parameters || {}), ...values };
+            action.parameters = { ...(action.parameters || {}), formData: values };
           } else if (action.type === 'submit_form') {
             action.formData = values;
           }
