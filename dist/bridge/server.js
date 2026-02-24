@@ -15,10 +15,12 @@ import { formatIntakeStart, formatIntakeResponse, formatIntakeProgress, formatCl
 import { formatDocumentChecklist as formatDocChecklistUI, formatDocumentCollected, formatPendingDocuments, } from '../ui/formatters/checklist.js';
 import { formatRoutingResult, formatTaxProRecommendations, formatAppointmentEstimate as formatEstimateUI, formatAppointmentCreated, } from '../ui/formatters/routing.js';
 import { formatRemindersCreated, formatRemindersList, formatReminderSent, formatNotificationSent, } from '../ui/formatters/reminders.js';
+import { toReadableText } from '../ui/toReadableText.js';
 /** Wrap a UIResponse into the MCP content block format with structuredContent for Apps SDK widget. */
 function toMcpContent(uiResp) {
+    const readable = toReadableText(uiResp);
     return {
-        content: [{ type: 'text', text: JSON.stringify(uiResp, null, 2) }],
+        content: [{ type: 'text', text: readable }],
         structuredContent: uiResp,
     };
 }

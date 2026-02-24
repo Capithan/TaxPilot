@@ -93,6 +93,7 @@ import {
 } from './ui/formatters/flow.js';
 
 import type { UIResponse } from './ui/types.js';
+import { toReadableText } from './ui/toReadableText.js';
 
 /** MCP Apps Widget resource URI */
 const WIDGET_RESOURCE_URI = 'ui://taxpilot/widget.html';
@@ -104,8 +105,9 @@ let latestToolResult: Record<string, unknown> | null = null;
 function toMcpContent(uiResp: UIResponse | Record<string, unknown>): { content: Array<{ type: 'text'; text: string }>; structuredContent: Record<string, unknown> } {
   const sc = uiResp as unknown as Record<string, unknown>;
   latestToolResult = sc;
+  const readable = toReadableText(sc);
   return {
-    content: [{ type: 'text' as const, text: JSON.stringify(uiResp, null, 2) }],
+    content: [{ type: 'text' as const, text: readable }],
     structuredContent: sc,
   };
 }

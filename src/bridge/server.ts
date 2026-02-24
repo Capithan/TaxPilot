@@ -66,11 +66,13 @@ import {
   formatNotificationSent,
 } from '../ui/formatters/reminders.js';
 import type { UIResponse } from '../ui/types.js';
+import { toReadableText } from '../ui/toReadableText.js';
 
 /** Wrap a UIResponse into the MCP content block format with structuredContent for Apps SDK widget. */
 function toMcpContent(uiResp: UIResponse | Record<string, unknown>): { content: Array<{ type: string; text: string }>; structuredContent: Record<string, unknown> } {
+  const readable = toReadableText(uiResp as Record<string, unknown>);
   return {
-    content: [{ type: 'text', text: JSON.stringify(uiResp, null, 2) }],
+    content: [{ type: 'text', text: readable }],
     structuredContent: uiResp as unknown as Record<string, unknown>,
   };
 }

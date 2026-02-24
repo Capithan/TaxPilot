@@ -14,6 +14,7 @@ import { formatDocumentChecklist, formatDocumentCollected, formatPendingDocument
 import { formatComplexityScore, formatRoutingResult, formatTaxProRecommendations, formatAppointmentEstimate, formatAppointmentCreated, formatTaxProList, formatClientProfile, } from './ui/formatters/routing.js';
 import { formatRemindersCreated, formatRemindersList, formatReminderSent, } from './ui/formatters/reminders.js';
 import { formatFlowStatus, formatFlowAdvanced, formatSummaryConfirmed, formatSchedulingPreferences, formatTaxProSelected, formatFlowProgress, } from './ui/formatters/flow.js';
+import { toReadableText } from './ui/toReadableText.js';
 /** MCP Apps Widget resource URI */
 const WIDGET_RESOURCE_URI = 'ui://taxpilot/widget.html';
 /** Store the latest tool result so the widget can render without the postMessage bridge */
@@ -22,8 +23,9 @@ let latestToolResult = null;
 function toMcpContent(uiResp) {
     const sc = uiResp;
     latestToolResult = sc;
+    const readable = toReadableText(sc);
     return {
-        content: [{ type: 'text', text: JSON.stringify(uiResp, null, 2) }],
+        content: [{ type: 'text', text: readable }],
         structuredContent: sc,
     };
 }
