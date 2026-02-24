@@ -16,11 +16,15 @@ import { formatRemindersCreated, formatRemindersList, formatReminderSent, } from
 import { formatFlowStatus, formatFlowAdvanced, formatSummaryConfirmed, formatSchedulingPreferences, formatTaxProSelected, formatFlowProgress, } from './ui/formatters/flow.js';
 /** MCP Apps Widget resource URI */
 const WIDGET_RESOURCE_URI = 'ui://taxpilot/widget.html';
+/** Store the latest tool result so the widget can render without the postMessage bridge */
+let latestToolResult = null;
 /** Wrap a UIResponse into the MCP content block format with structuredContent for Apps SDK. */
 function toMcpContent(uiResp) {
+    const sc = uiResp;
+    latestToolResult = sc;
     return {
         content: [{ type: 'text', text: JSON.stringify(uiResp, null, 2) }],
-        structuredContent: uiResp,
+        structuredContent: sc,
     };
 }
 // Create the MCP server
@@ -467,7 +471,7 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => {
             }],
     };
 });
-// Handle resource reading (serve the widget HTML)
+// Handle resource reading (serve the widget HTML with embedded tool data)
 server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     const { uri } = request.params;
     if (uri === WIDGET_RESOURCE_URI) {
@@ -477,7 +481,12 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
         const { fileURLToPath } = await import('url');
         const thisDir = dirname(fileURLToPath(import.meta.url));
         const widgetPath = join(thisDir, '..', 'public', 'taxpilot-widget.html');
-        const html = readFileSync(widgetPath, 'utf-8');
+        let html = readFileSync(widgetPath, 'utf-8');
+        // Inject latest tool data so widget renders even without the postMessage bridge
+        if (latestToolResult) {
+            const dataScript = `<script>window.__TAXPILOT_DATA__ = ${JSON.stringify(latestToolResult)};</script>`;
+            html = html.replace('</head>', `${dataScript}\n</head>`);
+        }
         return {
             contents: [{
                     uri: WIDGET_RESOURCE_URI,

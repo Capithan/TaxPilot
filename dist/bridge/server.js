@@ -28,6 +28,8 @@ const __dirname = path.dirname(__filename);
 const app = express();
 // Store active SSE sessions
 const sseSessions = new Map();
+// Store latest tool result so the widget can render data even without the Apps SDK bridge
+let latestToolResult = null;
 // Enhanced CORS for ChatGPT
 app.use(cors({
     origin: true,
@@ -380,11 +382,17 @@ app.get('/api/tools', (_req, res) => {
 // ── MCP Apps Widget Resource URI ────────────────────────────────────────────
 const WIDGET_RESOURCE_URI = 'ui://taxpilot/widget.html';
 const WIDGET_MIME_TYPE = 'text/html;profile=mcp-app';
-/** Read the widget HTML from public/taxpilot-widget.html */
-function readWidgetHtml() {
+/** Read the widget HTML from public/taxpilot-widget.html, optionally embedding tool result data */
+function readWidgetHtml(embedData) {
     const publicDir = path.join(__dirname, '..', '..', 'public');
     const widgetPath = path.join(publicDir, 'taxpilot-widget.html');
-    return fs.readFileSync(widgetPath, 'utf-8');
+    let html = fs.readFileSync(widgetPath, 'utf-8');
+    // Inject latest tool data so the widget can render even without the postMessage bridge
+    if (embedData) {
+        const dataScript = `<script>window.__TAXPILOT_DATA__ = ${JSON.stringify(embedData)};</script>`;
+        html = html.replace('</head>', `${dataScript}\n</head>`);
+    }
+    return html;
 }
 // Define available MCP tools with annotations and UI metadata (MCP Apps SDK)
 const mcpTools = [
@@ -579,6 +587,10 @@ app.post('/sse', (req, res) => {
     // Handle tools/call
     if (method === 'tools/call') {
         const toolResult = handleToolCall(params?.name, params?.arguments || {});
+        // Store latest result so widget can render via embedded data or REST fallback
+        if (toolResult.structuredContent) {
+            latestToolResult = toolResult.structuredContent;
+        }
         res.setHeader('Content-Type', 'application/json');
         res.json({
             jsonrpc: '2.0',
@@ -604,12 +616,12 @@ app.post('/sse', (req, res) => {
         });
         return;
     }
-    // Handle resources/read - return the widget HTML
+    // Handle resources/read - return the widget HTML with embedded latest tool data
     if (method === 'resources/read') {
         const uri = params?.uri;
         if (uri === WIDGET_RESOURCE_URI) {
             try {
-                const html = readWidgetHtml();
+                const html = readWidgetHtml(latestToolResult);
                 res.setHeader('Content-Type', 'application/json');
                 res.json({
                     jsonrpc: '2.0',
@@ -745,6 +757,10 @@ app.post('/messages', (req, res) => {
             break;
         case 'tools/call':
             const toolResult = handleToolCall(params.name, params.arguments || {});
+            // Store latest result so widget can render via embedded data or REST fallback
+            if (toolResult.structuredContent) {
+                latestToolResult = toolResult.structuredContent;
+            }
             response = {
                 jsonrpc: '2.0',
                 id,
@@ -769,7 +785,7 @@ app.post('/messages', (req, res) => {
             const readUri = params?.uri;
             if (readUri === WIDGET_RESOURCE_URI) {
                 try {
-                    const html = readWidgetHtml();
+                    const html = readWidgetHtml(latestToolResult);
                     response = {
                         jsonrpc: '2.0',
                         id,
@@ -809,6 +825,15 @@ app.post('/messages', (req, res) => {
             };
     }
     res.json(response);
+});
+// ─── Widget Data REST endpoint (fallback when Apps SDK bridge isn't available) ─
+app.get('/api/widget-data', (_req, res) => {
+    if (latestToolResult) {
+        res.json(latestToolResult);
+    }
+    else {
+        res.status(204).send();
+    }
 });
 // ─── ChatGPT SDK-powered chat API ────────────────────────────────────────────
 app.post('/api/chat', async (req, res) => {

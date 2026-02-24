@@ -1137,12 +1137,48 @@ function esc(text) {
       }
     }
   } else {
-    // Standalone mode — show a demo UI
-    renderer.root.innerHTML = `<div class="tp-structured">
-      <div class="tp-banner tp-banner--info"><span class="tp-banner-icon">ℹ️</span><span class="tp-banner-text">Running in standalone mode (not connected to ChatGPT)</span></div>
-      <div class="tp-text tp-text--heading">TaxPilot Widget</div>
-      <div class="tp-text tp-text--body">This widget renders inside ChatGPT when connected via the MCP Apps SDK. Open this page within a ChatGPT conversation to see interactive UI components.</div>
-    </div>`;
+    // Standalone mode — bridge handshake failed.
+    // Try rendering embedded data (injected by server in resources/read)
+    // or fetch latest tool result via REST API.
+    const embeddedData = window.__TAXPILOT_DATA__ || null;
+    if (embeddedData && (embeddedData.components || embeddedData.screen || embeddedData._ui || embeddedData.data)) {
+      // Render the embedded tool result
+      if (embeddedData.components) {
+        renderer.renderResponse(embeddedData);
+      } else {
+        renderer.renderUIResponse(embeddedData);
+      }
+    } else {
+      // Try REST fallback — fetch latest result from server
+      let fetched = false;
+      try {
+        const baseUrl = window.__TAXPILOT_SERVER__ || window.location.origin || '';
+        if (baseUrl) {
+          const resp = await fetch(`${baseUrl}/api/widget-data`, { mode: 'cors' });
+          if (resp.ok) {
+            const data = await resp.json();
+            if (data && (data.components || data.screen || data._ui)) {
+              if (data.components) {
+                renderer.renderResponse(data);
+              } else {
+                renderer.renderUIResponse(data);
+              }
+              fetched = true;
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('[Widget] REST fallback failed:', e);
+      }
+
+      if (!fetched) {
+        renderer.root.innerHTML = `<div class="tp-structured">
+          <div class="tp-banner tp-banner--info"><span class="tp-banner-icon">ℹ️</span><span class="tp-banner-text">Waiting for tool results...</span></div>
+          <div class="tp-text tp-text--heading">TaxPilot</div>
+          <div class="tp-text tp-text--body">The widget is ready. Use the assistant to run a tool (e.g. "start a client intake") and the results will appear here.</div>
+        </div>`;
+      }
+    }
   }
 })();
 </script>
