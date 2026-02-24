@@ -3,478 +3,396 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Tax Client Intake & Appointment Optimizer</title>
+  <title>TaxPilot — H&R Block Tax Intake & Appointment Optimizer</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    
+    /* ══════════════════════════════════════════════════════
+       BDS-ALIGNED H&R BLOCK DESIGN TOKENS
+       Based on Block Design System (BDS) v1.51
+       ══════════════════════════════════════════════════════ */
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      /* BDS Brand Colors */
+      --hrb-green:        #00A13A;
+      --hrb-green-dark:   #008830;
+      --hrb-green-light:  #E6F4EA;
+      --hrb-green-muted:  #66C285;
+      --hrb-neon:         #00E043;
+      --hrb-black:        #2D2A26;
+      --hrb-white:        #FFFFFF;
+
+      /* BDS Surfaces */
+      --bg:               #F5F0E8;
+      --bg-alt:           #EDE7DA;
+      --surface:          #FFFFFF;
+      --surface-alt:      #FFFDF9;
+      --surface-warm:     #FAF7F2;
+
+      /* BDS Text */
+      --text:             #2D2A26;
+      --text-secondary:   #5C5750;
+      --text-muted:       #8A847B;
+      --text-inverse:     #FFFFFF;
+
+      /* BDS Borders */
+      --border:           #D9D2C7;
+      --border-light:     #E8E2D8;
+      --border-focus:     #00A13A;
+
+      /* BDS Feedback */
+      --success:          #2E7D32;
+      --success-bg:       #E8F5E9;
+      --warning:          #E65100;
+      --warning-bg:       #FFF3E0;
+      --error:            #C62828;
+      --error-bg:         #FFEBEE;
+      --info:             #1565C0;
+      --info-bg:          #E3F2FD;
+
+      /* BDS Radius — hrb-card: 16px (large) or 8px (small) */
+      --radius-sm:        8px;
+      --radius-lg:        16px;
+
+      /* BDS Shadows */
+      --shadow:           0 1px 3px rgba(45,42,38,0.06), 0 1px 2px rgba(45,42,38,0.04);
+      --shadow-md:        0 4px 12px rgba(45,42,38,0.08);
+      --shadow-lg:        0 8px 24px rgba(45,42,38,0.10);
+      --shadow-focus:     0 0 0 3px rgba(0,161,58,0.15);
+    }
+
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, 'Helvetica Neue', sans-serif;
+      background: var(--bg);
+      color: var(--text);
       min-height: 100vh;
-      padding: 2rem;
+      line-height: 1.5;
     }
 
-    .container {
-      max-width: 1200px;
-      margin: 0 auto;
-      background: white;
-      border-radius: 12px;
-      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-      overflow: hidden;
+    /* ── Header — BDS pattern ──────────────────────────── */
+    .page-header {
+      background: var(--hrb-green);
+      color: var(--text-inverse);
+      padding: 0 2rem;
+      height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: 0 2px 8px rgba(0,161,58,0.2);
     }
-
-    header {
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-      padding: 3rem 2rem;
-      text-align: center;
+    .header-left { display: flex; align-items: center; gap: 14px; }
+    .header-logo {
+      width: 40px; height: 40px;
+      background: var(--hrb-white);
+      border-radius: var(--radius-sm);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px; font-weight: 800; color: var(--hrb-green);
     }
-
-    h1 {
-      font-size: 2.5rem;
-      margin-bottom: 0.5rem;
+    .header-title { font-size: 1.15rem; font-weight: 700; }
+    .header-sub { font-size: 0.75rem; opacity: 0.85; }
+    .header-right { display: flex; align-items: center; gap: 12px; }
+    .header-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: rgba(255,255,255,0.2);
+      padding: 4px 12px; border-radius: 20px;
+      font-size: 0.78rem; font-weight: 600;
     }
-
-    .subtitle {
-      font-size: 1.1rem;
-      opacity: 0.9;
+    .header-badge .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--hrb-neon); }
+    .header-badge .dot.offline { background: #FF5252; }
+    .header-link {
+      color: var(--text-inverse); text-decoration: none;
+      font-size: 0.85rem; padding: 6px 12px;
+      border: 1px solid rgba(255,255,255,0.35);
+      border-radius: var(--radius-sm); transition: all 0.2s;
     }
+    .header-link:hover { background: rgba(255,255,255,0.15); border-color: rgba(255,255,255,0.6); }
 
-    main {
-      padding: 2rem;
+    /* ── Hero ──────────────────────────────────────────── */
+    .hero {
+      background: linear-gradient(135deg, #008830 0%, #00A13A 50%, #66C285 100%);
+      color: var(--text-inverse); padding: 3rem 2rem; text-align: center;
     }
+    .hero h1 { font-size: 2rem; font-weight: 700; margin-bottom: 0.75rem; }
+    .hero p { font-size: 1.05rem; opacity: 0.9; max-width: 600px; margin: 0 auto; line-height: 1.6; }
 
-    .content {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 2rem;
-      margin-bottom: 2rem;
-    }
+    /* ── Main Container ──────────────────────────────────── */
+    .container { max-width: 1200px; margin: 0 auto; padding: 2rem; }
 
+    /* ── BDS hrb-card ────────────────────────────────────── */
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 2rem; }
     .card {
-      background: #f8f9fa;
-      border: 1px solid #e9ecef;
-      border-radius: 8px;
-      padding: 1.5rem;
+      background: var(--surface); border-radius: var(--radius-lg);
+      padding: 24px; box-shadow: var(--shadow); border: 1px solid var(--border-light);
+      transition: box-shadow 0.2s;
     }
-
-    .card h2 {
-      font-size: 1.3rem;
-      margin-bottom: 1rem;
-      color: #667eea;
-      border-bottom: 2px solid #667eea;
-      padding-bottom: 0.5rem;
+    .card:hover { box-shadow: var(--shadow-md); }
+    .card-header {
+      display: flex; align-items: center; gap: 10px;
+      margin-bottom: 16px; padding-bottom: 12px; border-bottom: 2px solid var(--hrb-green-light);
     }
-
-    .card h3 {
-      font-size: 0.95rem;
-      color: #666;
-      margin-top: 1rem;
-      margin-bottom: 0.5rem;
+    .card-icon {
+      width: 36px; height: 36px; background: var(--hrb-green-light);
+      border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center;
+      font-size: 18px; flex-shrink: 0;
     }
+    .card h2 { font-size: 1.1rem; font-weight: 700; color: var(--text); }
+    .card p.card-desc { font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 16px; line-height: 1.5; }
+    .card h3 { font-size: 0.88rem; color: var(--text-secondary); margin-top: 16px; margin-bottom: 8px; font-weight: 600; }
 
+    /* ── BDS hrb-button ──────────────────────────────────── */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      width: 100%; padding: 14px 24px; border-radius: var(--radius-sm);
+      font-family: inherit; font-size: 0.95rem; font-weight: 600;
+      cursor: pointer; border: 2px solid transparent; transition: all 0.2s ease; line-height: 1.4;
+    }
+    .btn:active { transform: scale(0.97); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    .btn:focus-visible { outline: none; box-shadow: var(--shadow-focus); }
+    .btn-primary { background: var(--hrb-green); color: var(--text-inverse); border-color: var(--hrb-green); }
+    .btn-primary:hover:not(:disabled) { background: var(--hrb-green-dark); border-color: var(--hrb-green-dark); box-shadow: 0 2px 8px rgba(0,161,58,0.3); }
+    .btn-secondary { background: var(--surface); color: var(--hrb-green); border-color: var(--hrb-green); }
+    .btn-secondary:hover:not(:disabled) { background: var(--hrb-green-light); }
+    .btn-dark { background: var(--hrb-black); color: var(--text-inverse); border-color: var(--hrb-black); }
+    .btn-dark:hover:not(:disabled) { background: #1a1815; }
+
+    /* ── Form Fields ──────────────────────────────────────── */
+    .field { margin-bottom: 12px; }
+    .field label { display: block; font-size: 0.82rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 5px; }
     input, textarea, select {
-      width: 100%;
-      padding: 0.75rem;
-      margin-bottom: 0.5rem;
-      border: 1px solid #ddd;
-      border-radius: 4px;
-      font-family: inherit;
-      font-size: 0.95rem;
+      width: 100%; padding: 12px 14px; border: 1.5px solid var(--border);
+      border-radius: var(--radius-sm); background: var(--surface);
+      font-family: inherit; font-size: 0.92rem; color: var(--text);
+      transition: border-color 0.2s, box-shadow 0.2s;
     }
+    input:focus, textarea:focus, select:focus { outline: none; border-color: var(--hrb-green); box-shadow: var(--shadow-focus); }
+    input::placeholder, textarea::placeholder { color: var(--text-muted); }
+    textarea { resize: vertical; min-height: 60px; }
 
-    input:focus, textarea:focus, select:focus {
-      outline: none;
-      border-color: #667eea;
-      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-    }
-
-    button {
-      background: #667eea;
-      color: white;
-      border: none;
-      padding: 0.75rem 1.5rem;
-      border-radius: 4px;
-      font-size: 0.95rem;
-      cursor: pointer;
-      transition: all 0.3s ease;
-      width: 100%;
-      margin-top: 0.5rem;
-    }
-
-    button:hover {
-      background: #5568d3;
-      transform: translateY(-2px);
-      box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
-    }
-
-    button:active {
-      transform: translateY(0);
-    }
-
-    button.secondary {
-      background: #6c757d;
-    }
-
-    button.secondary:hover {
-      background: #5a6268;
-    }
-
+    /* ── Output ──────────────────────────────────────────── */
     .output {
-      background: white;
-      border: 1px solid #ddd;
-      border-radius: 4px;
-      padding: 1rem;
-      margin-top: 1rem;
-      max-height: 300px;
-      overflow-y: auto;
-      font-size: 0.85rem;
-      font-family: 'Monaco', 'Courier New', monospace;
-      color: #333;
-      white-space: pre-wrap;
-      word-break: break-word;
+      background: var(--surface-warm); border: 1px solid var(--border-light);
+      border-radius: var(--radius-sm); padding: 14px 16px; margin-top: 12px;
+      max-height: 280px; overflow-y: auto; font-size: 0.82rem;
+      font-family: 'Cascadia Code', 'Consolas', monospace; color: var(--text);
+      white-space: pre-wrap; word-break: break-word; line-height: 1.6;
     }
+    .output.empty { color: var(--text-muted); font-style: italic; font-family: inherit; }
 
-    .output.empty {
-      color: #999;
-      font-style: italic;
-    }
+    /* ── Status Alerts ──────────────────────────────────── */
+    .status { padding: 12px 16px; border-radius: var(--radius-sm); margin: 12px 0; display: none; font-size: 0.88rem; font-weight: 500; }
+    .status.success { background: var(--success-bg); color: var(--success); border: 1px solid #A5D6A7; display: block; }
+    .status.error { background: var(--error-bg); color: var(--error); border: 1px solid #EF9A9A; display: block; }
 
-    .status {
-      padding: 1rem;
-      border-radius: 4px;
-      margin: 1rem 0;
-      display: none;
-    }
-
-    .status.success {
-      background: #d4edda;
-      color: #155724;
-      border: 1px solid #c3e6cb;
-      display: block;
-    }
-
-    .status.error {
-      background: #f8d7da;
-      color: #721c24;
-      border: 1px solid #f5c6cb;
-      display: block;
-    }
-
+    /* ── Workflow ──────────────────────────────────────── */
     .workflow {
-      background: white;
-      padding: 2rem;
-      border-radius: 8px;
-      margin-top: 2rem;
+      background: var(--surface); border-radius: var(--radius-lg); padding: 24px;
+      box-shadow: var(--shadow); border: 1px solid var(--border-light); margin-bottom: 2rem;
     }
-
-    .workflow h2 {
-      font-size: 1.3rem;
-      margin-bottom: 1.5rem;
-      color: #667eea;
-      border-bottom: 2px solid #667eea;
-      padding-bottom: 0.5rem;
-    }
-
-    .workflow-step {
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr 1fr;
-      gap: 1rem;
-      margin-bottom: 1.5rem;
-    }
-
+    .workflow-header { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 2px solid var(--hrb-green-light); }
+    .workflow-header h2 { font-size: 1.1rem; font-weight: 700; }
+    .workflow-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
     .step-card {
-      background: #f8f9fa;
-      padding: 1rem;
-      border-radius: 6px;
-      border-left: 4px solid #667eea;
-      text-align: center;
+      background: var(--surface-warm); padding: 20px 16px; border-radius: var(--radius-sm);
+      border-left: 4px solid var(--hrb-green); text-align: center; transition: all 0.2s;
     }
-
-    .step-number {
-      font-weight: bold;
-      color: #667eea;
-      font-size: 1.2rem;
-      margin-bottom: 0.5rem;
+    .step-card:hover { background: var(--hrb-green-light); transform: translateY(-2px); box-shadow: var(--shadow); }
+    .step-num {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 32px; height: 32px; background: var(--hrb-green); color: var(--text-inverse);
+      border-radius: 50%; font-weight: 700; font-size: 0.9rem; margin-bottom: 10px;
     }
+    .step-title { font-weight: 700; font-size: 0.92rem; color: var(--text); margin-bottom: 4px; }
+    .step-desc { font-size: 0.8rem; color: var(--text-muted); }
 
-    .step-name {
-      font-size: 0.9rem;
-      color: #666;
+    /* ── Footer ──────────────────────────────────────────── */
+    .page-footer {
+      background: var(--surface); border-top: 1px solid var(--border-light);
+      padding: 1.5rem 2rem; text-align: center; color: var(--text-muted); font-size: 0.82rem;
     }
+    .page-footer code { background: var(--bg-alt); padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; }
 
-    .full-width {
-      grid-column: 1 / -1;
+    /* ── Skip Link — accessibility ──────────────────────── */
+    .skip-link {
+      position: absolute; top: -100%; left: 50%; transform: translateX(-50%);
+      background: var(--hrb-green); color: var(--text-inverse); padding: 8px 16px;
+      border-radius: var(--radius-sm); font-weight: 600; z-index: 100; text-decoration: none;
     }
+    .skip-link:focus { top: 8px; }
 
-    .two-col {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1rem;
+    /* ── Responsive ──────────────────────────────────────── */
+    @media (max-width: 768px) {
+      .grid { grid-template-columns: 1fr; }
+      .workflow-steps { grid-template-columns: 1fr 1fr; }
+      .hero { padding: 2rem 1.5rem; }
+      .hero h1 { font-size: 1.6rem; }
+      .container { padding: 1.5rem; }
     }
-
-    .icon {
-      font-size: 1.5rem;
-      margin-bottom: 0.5rem;
-    }
-
-    footer {
-      background: #f8f9fa;
-      padding: 1.5rem;
-      text-align: center;
-      color: #666;
-      border-top: 1px solid #e9ecef;
+    @media (max-width: 480px) {
+      .workflow-steps { grid-template-columns: 1fr; }
+      .page-header { padding: 0 1rem; }
+      .header-link { display: none; }
     }
   </style>
 </head>
 <body>
-  <div class="container">
-    <header>
-      <h1>💼 Tax Intake & Appointment Optimizer</h1>
-      <p class="subtitle">AI-powered client preparation system - Works standalone or with ChatGPT</p>
-    </header>
 
-    <main>
-      <div class="content">
-        <!-- Intake Section -->
-        <div class="card">
-          <h2>📋 Client Intake</h2>
-          <p style="margin-bottom: 1rem; color: #666;">Start a new intake session or respond to questions.</p>
-          
-          <button id="btnStart" class="primary">Start New Intake</button>
-          
-          <div id="intakeStatus" class="status"></div>
-          <div id="outStart" class="output empty">Intake started data will appear here...</div>
-          
-          <h3>Continue Session</h3>
-          <input type="text" id="sessionId" placeholder="Session ID (auto-filled after start)">
-          <textarea id="answer" placeholder="Enter your response to the current question..." rows="3"></textarea>
-          <button id="btnRespond">Send Response</button>
-          <div id="outRespond" class="output empty">Response will appear here...</div>
-        </div>
+<a href="#main-content" class="skip-link">Skip to main content</a>
 
-        <!-- Checklist Section -->
-        <div class="card">
-          <h2>📝 Document Checklist</h2>
-          <p style="margin-bottom: 1rem; color: #666;">Generate personalized document requirements.</p>
-          
-          <input type="text" id="clientId" placeholder="Client ID (auto-filled after intake start)">
-          <button id="btnGenChecklist">Generate Checklist</button>
-          
-          <div id="checklistStatus" class="status"></div>
-          <div id="outChecklist" class="output empty">Checklist will appear here...</div>
-        </div>
+<!-- Header -->
+<header class="page-header" role="banner">
+  <div class="header-left">
+    <div class="header-logo" aria-hidden="true">H</div>
+    <div>
+      <div class="header-title">TaxPilot</div>
+      <div class="header-sub">H&amp;R Block AI Assistant</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="header-badge" role="status" aria-label="Connection status">
+      <span class="dot" id="healthDot"></span>
+      <span id="healthText">Checking…</span>
+    </div>
+    <a href="/chat.html" class="header-link">Open Chat UI →</a>
+  </div>
+</header>
 
-        <!-- Routing Section -->
-        <div class="card">
-          <h2>🎯 Tax Pro Routing</h2>
-          <p style="margin-bottom: 1rem; color: #666;">Get matched with the best tax professional.</p>
-          
-          <button id="btnRoute">Route Client</button>
-          
-          <div id="routeStatus" class="status"></div>
-          <div id="outRoute" class="output empty">Routing recommendation will appear here...</div>
-        </div>
+<!-- Hero -->
+<section class="hero" role="region" aria-label="Welcome banner">
+  <h1>&#x1F4BC; Tax Intake &amp; Appointment Optimizer</h1>
+  <p>AI-powered client preparation system — test every MCP tool directly, or switch to the full Chat UI for the guided experience.</p>
+</section>
 
-        <!-- Reminders Section -->
-        <div class="card">
-          <h2>🔔 Appointment Reminders</h2>
-          <p style="margin-bottom: 1rem; color: #666;">Create personalized reminders for documents and appointments.</p>
-          
-          <input type="text" id="appointmentId" placeholder="Appointment ID (optional)">
-          <button id="btnReminders">Create Reminders</button>
-          
-          <div id="remindersStatus" class="status"></div>
-          <div id="outReminders" class="output empty">Reminders will appear here...</div>
-        </div>
+<!-- Main Content -->
+<main class="container" id="main-content">
+  <div class="grid">
 
-        <!-- Health Check Section -->
-        <div class="card">
-          <h2>🏥 System Health</h2>
-          <p style="margin-bottom: 1rem; color: #666;">Check service status and connectivity.</p>
-          
-          <button id="btnHealth">Check Health</button>
-          <div id="outHealth" class="output empty">Health status will appear here...</div>
-        </div>
-
-        <!-- SSE Connection Section -->
-        <div class="card">
-          <h2>🔌 Live Streaming</h2>
-          <p style="margin-bottom: 1rem; color: #666;">Connect to real-time SSE updates.</p>
-          
-          <button id="btnSse">Connect to SSE</button>
-          <button id="btnStopSse" class="secondary" style="display:none;">Stop SSE</button>
-          <div id="outSse" class="output empty">SSE events will appear here...</div>
-        </div>
+    <!-- Intake -->
+    <div class="card" role="region" aria-labelledby="intake-heading">
+      <div class="card-header">
+        <div class="card-icon" aria-hidden="true">&#x1F4CB;</div>
+        <h2 id="intake-heading">Client Intake</h2>
       </div>
+      <p class="card-desc">Start a new intake session or respond to questions step by step.</p>
+      <button class="btn btn-primary" id="btnStart" aria-label="Start new intake session">&#x25B6;&#xFE0F; Start New Intake</button>
+      <div id="intakeStatus" class="status" role="alert"></div>
+      <div id="outStart" class="output empty" role="log" aria-live="polite">Intake data will appear here…</div>
+      <h3>Continue Session</h3>
+      <div class="field"><label for="sessionId">Session ID</label><input type="text" id="sessionId" placeholder="Auto-filled after start"></div>
+      <div class="field"><label for="answer">Your Response</label><textarea id="answer" placeholder="Enter your response to the current question…" rows="3"></textarea></div>
+      <button class="btn btn-secondary" id="btnRespond" aria-label="Send response">&#x1F4AC; Send Response</button>
+      <div id="outRespond" class="output empty" role="log" aria-live="polite">Response will appear here…</div>
+    </div>
 
-      <!-- Workflow Overview -->
-      <div class="workflow">
-        <h2>📊 Complete Workflow</h2>
-        <div class="workflow-step">
-          <div class="step-card">
-            <div class="icon">1️⃣</div>
-            <div class="step-number">Start</div>
-            <div class="step-name">Begin intake</div>
-          </div>
-          <div class="step-card">
-            <div class="icon">2️⃣</div>
-            <div class="step-number">Respond</div>
-            <div class="step-name">Answer questions</div>
-          </div>
-          <div class="step-card">
-            <div class="icon">3️⃣</div>
-            <div class="step-number">Checklist</div>
-            <div class="step-name">Generate docs</div>
-          </div>
-          <div class="step-card">
-            <div class="icon">4️⃣</div>
-            <div class="step-number">Route</div>
-            <div class="step-name">Find tax pro</div>
-          </div>
-        </div>
+    <!-- Checklist -->
+    <div class="card" role="region" aria-labelledby="checklist-heading">
+      <div class="card-header">
+        <div class="card-icon" aria-hidden="true">&#x1F4DD;</div>
+        <h2 id="checklist-heading">Document Checklist</h2>
       </div>
-    </main>
+      <p class="card-desc">Generate personalized document requirements based on client profile.</p>
+      <div class="field"><label for="clientId">Client ID</label><input type="text" id="clientId" placeholder="Auto-filled after intake start"></div>
+      <button class="btn btn-primary" id="btnGenChecklist" aria-label="Generate document checklist">&#x1F4CB; Generate Checklist</button>
+      <div id="checklistStatus" class="status" role="alert"></div>
+      <div id="outChecklist" class="output empty" role="log" aria-live="polite">Checklist will appear here…</div>
+    </div>
 
-    <footer>
-      <p>Tax Intake MCP Server • Standalone App + ChatGPT Integration</p>
-      <p style="font-size: 0.9rem; margin-top: 0.5rem;">Base URL: <code id="baseUrl" style="background:#f0f0f0;padding:0.2rem 0.4rem;border-radius:3px;">http://localhost:3000</code></p>
-    </footer>
+    <!-- Routing -->
+    <div class="card" role="region" aria-labelledby="routing-heading">
+      <div class="card-header">
+        <div class="card-icon" aria-hidden="true">&#x1F3AF;</div>
+        <h2 id="routing-heading">Tax Pro Routing</h2>
+      </div>
+      <p class="card-desc">Get matched with the best tax professional based on client complexity and needs.</p>
+      <button class="btn btn-primary" id="btnRoute" aria-label="Route client to tax professional">&#x1F3AF; Route Client</button>
+      <div id="routeStatus" class="status" role="alert"></div>
+      <div id="outRoute" class="output empty" role="log" aria-live="polite">Routing recommendation will appear here…</div>
+    </div>
+
+    <!-- Reminders -->
+    <div class="card" role="region" aria-labelledby="reminders-heading">
+      <div class="card-header">
+        <div class="card-icon" aria-hidden="true">&#x1F514;</div>
+        <h2 id="reminders-heading">Appointment Reminders</h2>
+      </div>
+      <p class="card-desc">Create personalized reminders for documents and upcoming appointments.</p>
+      <div class="field"><label for="appointmentId">Appointment ID (optional)</label><input type="text" id="appointmentId" placeholder="Enter appointment ID"></div>
+      <button class="btn btn-primary" id="btnReminders" aria-label="Create appointment reminders">&#x1F514; Create Reminders</button>
+      <div id="remindersStatus" class="status" role="alert"></div>
+      <div id="outReminders" class="output empty" role="log" aria-live="polite">Reminders will appear here…</div>
+    </div>
+
+    <!-- Health -->
+    <div class="card" role="region" aria-labelledby="health-heading">
+      <div class="card-header">
+        <div class="card-icon" aria-hidden="true">&#x1F3E5;</div>
+        <h2 id="health-heading">System Health</h2>
+      </div>
+      <p class="card-desc">Check service status, API connectivity, and runtime info.</p>
+      <button class="btn btn-secondary" id="btnHealth" aria-label="Check system health">&#x1F3E5; Check Health</button>
+      <div id="outHealth" class="output empty" role="log" aria-live="polite">Health status will appear here…</div>
+    </div>
+
+    <!-- SSE -->
+    <div class="card" role="region" aria-labelledby="sse-heading">
+      <div class="card-header">
+        <div class="card-icon" aria-hidden="true">&#x1F50C;</div>
+        <h2 id="sse-heading">Live Streaming (SSE)</h2>
+      </div>
+      <p class="card-desc">Connect to real-time Server-Sent Events for live updates.</p>
+      <button class="btn btn-primary" id="btnSse" aria-label="Connect to SSE stream">&#x1F50C; Connect to SSE</button>
+      <button class="btn btn-dark" id="btnStopSse" style="display:none;" aria-label="Disconnect SSE stream">&#x23F9;&#xFE0F; Disconnect</button>
+      <div id="outSse" class="output empty" role="log" aria-live="polite">SSE events will appear here…</div>
+    </div>
+
   </div>
 
-  <script>
-    const base = '';
-    const $ = (id) => document.getElementById(id);
-    const show = (id, msg, type = 'success') => {
-      const el = $(id);
-      el.textContent = msg;
-      el.className = 'status ' + type;
-    };
-    const output = (id, data) => {
-      const el = $(id);
-      if (typeof data === 'string') {
-        el.textContent = data;
-      } else {
-        el.textContent = JSON.stringify(data, null, 2);
-      }
-      el.classList.remove('empty');
-    };
+  <!-- Workflow -->
+  <div class="workflow" role="region" aria-labelledby="workflow-heading">
+    <div class="workflow-header">
+      <div class="card-icon" aria-hidden="true">&#x1F4CA;</div>
+      <h2 id="workflow-heading">Complete Workflow</h2>
+    </div>
+    <div class="workflow-steps">
+      <div class="step-card"><div class="step-num" aria-hidden="true">1</div><div class="step-title">Start Intake</div><div class="step-desc">Begin collecting client info</div></div>
+      <div class="step-card"><div class="step-num" aria-hidden="true">2</div><div class="step-title">Answer Questions</div><div class="step-desc">Step-by-step tax details</div></div>
+      <div class="step-card"><div class="step-num" aria-hidden="true">3</div><div class="step-title">Generate Docs</div><div class="step-desc">Personalized checklist</div></div>
+      <div class="step-card"><div class="step-num" aria-hidden="true">4</div><div class="step-title">Match &amp; Book</div><div class="step-desc">Find tax pro &amp; schedule</div></div>
+    </div>
+  </div>
+</main>
 
-    // Start Intake
-    $('btnStart').onclick = async () => {
-      try {
-        const r = await fetch(base + '/intake/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-        const j = await r.json();
-        output('outStart', j);
-        $('sessionId').value = j.sessionId || '';
-        $('clientId').value = j.clientId || '';
-        show('intakeStatus', '✓ Intake session started!', 'success');
-      } catch (e) {
-        show('intakeStatus', `✗ Error: ${e.message}`, 'error');
-      }
-    };
+<!-- Footer -->
+<footer class="page-footer" role="contentinfo">
+  <p>TaxPilot MCP Server &middot; H&amp;R Block AI Tax Assistant</p>
+  <p style="margin-top: 6px;">Base URL: <code id="baseUrl">http://localhost:8080</code></p>
+</footer>
 
-    // Respond to Question
-    $('btnRespond').onclick = async () => {
-      try {
-        const r = await fetch(base + '/intake/respond', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sessionId: $('sessionId').value, answer: $('answer').value })
-        });
-        const j = await r.json();
-        output('outRespond', j);
-        $('answer').value = '';
-      } catch (e) {
-        show('intakeStatus', `✗ Error: ${e.message}`, 'error');
-      }
-    };
+<script>
+  const base = '';
+  const $ = (id) => document.getElementById(id);
+  const show = (id, msg, type = 'success') => { const el = $(id); el.textContent = (type === 'success' ? '✓ ' : '✗ ') + msg; el.className = 'status ' + type; };
+  const output = (id, data) => { const el = $(id); el.textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2); el.classList.remove('empty'); };
 
-    // Generate Checklist
-    $('btnGenChecklist').onclick = async () => {
-      try {
-        const r = await fetch(base + `/client/${$('clientId').value}/checklist/generate`, { method: 'POST' });
-        const text = await r.text();
-        output('outChecklist', text);
-        show('checklistStatus', '✓ Checklist generated!', 'success');
-      } catch (e) {
-        show('checklistStatus', `✗ Error: ${e.message}`, 'error');
-      }
-    };
+  async function checkHealth() {
+    try {
+      const r = await fetch(base + '/health');
+      if (r.ok) { $('healthDot').className = 'dot'; $('healthText').textContent = 'Connected'; }
+      else { $('healthDot').className = 'dot offline'; $('healthText').textContent = 'Offline'; }
+    } catch(e) { $('healthDot').className = 'dot offline'; $('healthText').textContent = 'Offline'; }
+  }
+  checkHealth(); setInterval(checkHealth, 30000);
 
-    // Route Client
-    $('btnRoute').onclick = async () => {
-      try {
-        const r = await fetch(base + `/client/${$('clientId').value}/route`, { method: 'POST' });
-        const j = await r.json();
-        output('outRoute', j);
-        show('routeStatus', '✓ Routing complete!', 'success');
-      } catch (e) {
-        show('routeStatus', `✗ Error: ${e.message}`, 'error');
-      }
-    };
+  $('btnStart').onclick = async () => { $('btnStart').disabled = true; try { const r = await fetch(base + '/intake/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); const j = await r.json(); output('outStart', j); $('sessionId').value = j.sessionId || ''; $('clientId').value = j.clientId || ''; show('intakeStatus', 'Intake session started!', 'success'); } catch (e) { show('intakeStatus', 'Error: ' + e.message, 'error'); } finally { $('btnStart').disabled = false; } };
+  $('btnRespond').onclick = async () => { $('btnRespond').disabled = true; try { const r = await fetch(base + '/intake/respond', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: $('sessionId').value, answer: $('answer').value }) }); const j = await r.json(); output('outRespond', j); $('answer').value = ''; } catch (e) { show('intakeStatus', 'Error: ' + e.message, 'error'); } finally { $('btnRespond').disabled = false; } };
+  $('btnGenChecklist').onclick = async () => { $('btnGenChecklist').disabled = true; try { const r = await fetch(base + '/client/' + $('clientId').value + '/checklist/generate', { method: 'POST' }); const text = await r.text(); output('outChecklist', text); show('checklistStatus', 'Checklist generated!', 'success'); } catch (e) { show('checklistStatus', 'Error: ' + e.message, 'error'); } finally { $('btnGenChecklist').disabled = false; } };
+  $('btnRoute').onclick = async () => { $('btnRoute').disabled = true; try { const r = await fetch(base + '/client/' + $('clientId').value + '/route', { method: 'POST' }); const j = await r.json(); output('outRoute', j); show('routeStatus', 'Routing complete!', 'success'); } catch (e) { show('routeStatus', 'Error: ' + e.message, 'error'); } finally { $('btnRoute').disabled = false; } };
+  $('btnReminders').onclick = async () => { $('btnReminders').disabled = true; try { const r = await fetch(base + '/client/' + $('clientId').value + '/reminders/documents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ appointmentId: $('appointmentId').value }) }); const text = await r.text(); output('outReminders', text); show('remindersStatus', 'Reminders created!', 'success'); } catch (e) { show('remindersStatus', 'Error: ' + e.message, 'error'); } finally { $('btnReminders').disabled = false; } };
+  $('btnHealth').onclick = async () => { $('btnHealth').disabled = true; try { const r = await fetch(base + '/health'); const j = await r.json(); output('outHealth', j); } catch (e) { output('outHealth', 'Error: ' + e.message); } finally { $('btnHealth').disabled = false; } };
 
-    // Create Reminders
-    $('btnReminders').onclick = async () => {
-      try {
-        const r = await fetch(base + `/client/${$('clientId').value}/reminders/documents`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ appointmentId: $('appointmentId').value })
-        });
-        const text = await r.text();
-        output('outReminders', text);
-        show('remindersStatus', '✓ Reminders created!', 'success');
-      } catch (e) {
-        show('remindersStatus', `✗ Error: ${e.message}`, 'error');
-      }
-    };
-
-    // Health Check
-    $('btnHealth').onclick = async () => {
-      try {
-        const r = await fetch(base + '/health');
-        const j = await r.json();
-        output('outHealth', j);
-      } catch (e) {
-        output('outHealth', `Error: ${e.message}`);
-      }
-    };
-
-    // SSE Connection
-    let sse = null;
-    $('btnSse').onclick = async () => {
-      try {
-        const out = $('outSse');
-        out.textContent = 'Connecting to SSE stream...\n';
-        out.classList.remove('empty');
-        sse = new EventSource(base + '/sse');
-        sse.addEventListener('ready', (e) => { out.textContent += `[READY] ${e.data}\n`; });
-        sse.addEventListener('ping', (e) => { out.textContent += `[PING] ${new Date().toLocaleTimeString()}\n`; });
-        sse.onerror = (e) => {
-          out.textContent += `[ERROR] Connection closed\n`;
-          $('btnSse').style.display = 'block';
-          $('btnStopSse').style.display = 'none';
-        };
-        $('btnSse').style.display = 'none';
-        $('btnStopSse').style.display = 'block';
-      } catch (e) {
-        output('outSse', `Error: ${e.message}`);
-      }
-    };
-
-    $('btnStopSse').onclick = () => {
-      if (sse) {
-        sse.close();
-        sse = null;
-      }
-      $('btnSse').style.display = 'block';
-      $('btnStopSse').style.display = 'none';
-      $('outSse').textContent += '\n[CLOSED] Connection stopped by user\n';
-    };
-
-    // Update base URL display
-    $('baseUrl').textContent = window.location.origin;
-  </script>
+  let sse = null;
+  $('btnSse').onclick = () => { try { const out = $('outSse'); out.textContent = 'Connecting to SSE stream…\n'; out.classList.remove('empty'); sse = new EventSource(base + '/sse'); sse.addEventListener('ready', (e) => { out.textContent += '[READY] ' + e.data + '\n'; }); sse.addEventListener('ping', (e) => { out.textContent += '[PING] ' + new Date().toLocaleTimeString() + '\n'; }); sse.onerror = () => { out.textContent += '[ERROR] Connection closed\n'; $('btnSse').style.display = 'block'; $('btnStopSse').style.display = 'none'; }; $('btnSse').style.display = 'none'; $('btnStopSse').style.display = 'block'; } catch (e) { output('outSse', 'Error: ' + e.message); } };
+  $('btnStopSse').onclick = () => { if (sse) { sse.close(); sse = null; } $('btnSse').style.display = 'block'; $('btnStopSse').style.display = 'none'; $('outSse').textContent += '\n[CLOSED] Connection stopped by user\n'; };
+  $('baseUrl').textContent = window.location.origin;
+</script>
 </body>
 </html>

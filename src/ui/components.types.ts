@@ -281,6 +281,97 @@ export interface CarouselComponent {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// ACCORDION (BDS hrb-accordion aligned)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export interface AccordionItem {
+  title: string;
+  content?: string;
+  icon?: string;
+  badge?: string;
+  expanded?: boolean;
+  /** Nested components rendered inside the panel */
+  components?: UIComponent[];
+}
+
+export interface AccordionComponent {
+  component: 'Accordion';
+  title?: string;
+  items: AccordionItem[];
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ALERT (inline alert box with optional actions)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export interface AlertComponent {
+  component: 'Alert';
+  title?: string;
+  text: string;
+  variant: 'success' | 'info' | 'warning' | 'error';
+  icon?: string;
+  dismissible?: boolean;
+  actions?: ButtonComponent[];
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TAB GROUP
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export interface TabItem {
+  label: string;
+  icon?: string;
+  content?: string;
+  components?: UIComponent[];
+}
+
+export interface TabGroupComponent {
+  component: 'TabGroup';
+  title?: string;
+  tabs: TabItem[];
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// NOTIFICATION (toast trigger from structured response)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export interface NotificationComponent {
+  component: 'Notification';
+  message: string;
+  variant: 'success' | 'info' | 'warning' | 'error';
+  icon?: string;
+  duration?: number;
+  /** Also render as inline content */
+  showInline?: boolean;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TOOLTIP
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export interface TooltipComponent {
+  component: 'Tooltip';
+  text: string;
+  tooltip: string;
+  position?: 'top' | 'bottom' | 'left' | 'right';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// STAT CARD (key metric display)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export interface StatCardComponent {
+  component: 'StatCard';
+  value: string;
+  label: string;
+  icon?: string;
+  trend?: {
+    direction: 'up' | 'down' | 'neutral';
+    text?: string;
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // ACTION PAYLOADS
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -325,7 +416,13 @@ export type UIComponent =
   | BannerComponent
   | DividerComponent
   | TextBlockComponent
-  | CarouselComponent;
+  | CarouselComponent
+  | AccordionComponent
+  | AlertComponent
+  | TabGroupComponent
+  | NotificationComponent
+  | TooltipComponent
+  | StatCardComponent;
 
 /**
  * A structured UI response that the ChatGPT assistant returns.

@@ -11,12 +11,13 @@ export const hrbTheme = {
   // ── Brand Colors ────────────────────────────────────────────────
   colors: {
     brand: {
-      primary:       '#00A13A',   // H&R Block Green
-      primaryDark:   '#008830',
-      primaryLight:  '#E6F4EA',
-      primaryMuted:  '#66C285',
-      secondary:     '#2D2A26',   // Dark charcoal
-      accent:        '#00A13A',
+      primary:       '#00A13A',   // H&R Block Green (BDS primary)
+      primaryDark:   '#008830',   // BDS button hover
+      primaryLight:  '#E6F4EA',   // BDS green-light bg
+      primaryMuted:  '#66C285',   // BDS muted accent
+      neon:          '#00E043',   // BDS neon theme
+      secondary:     '#2D2A26',   // BDS black theme
+      accent:        '#00A13A',   // BDS primary accent
     },
 
     // Surfaces
@@ -50,9 +51,9 @@ export const hrbTheme = {
     status: {
       success:       '#2E7D32',
       successBg:     '#E8F5E9',
-      warning:       '#E65100',
+      warning:       '#E65100',    // BDS warm warning
       warningBg:     '#FFF3E0',
-      error:         '#C62828',
+      error:         '#C62828',     // BDS error red
       errorBg:       '#FFEBEE',
       info:          '#1565C0',
       infoBg:        '#E3F2FD',

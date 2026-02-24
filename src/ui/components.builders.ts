@@ -29,6 +29,14 @@ import type {
   DividerComponent,
   TextBlockComponent,
   CarouselComponent,
+  AccordionComponent,
+  AccordionItem,
+  AlertComponent,
+  TabGroupComponent,
+  TabItem,
+  NotificationComponent,
+  TooltipComponent,
+  StatCardComponent,
   UIActionPayload,
   UIComponent,
   StructuredUIResponse,
@@ -208,6 +216,56 @@ export function carousel(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// NEW COMPONENT BUILDERS (v2.1 — BDS-aligned additions)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export function accordion(
+  items: AccordionItem[],
+  opts?: { title?: string },
+): AccordionComponent {
+  return { component: 'Accordion', items, ...opts };
+}
+
+export function alert(
+  text: string,
+  variant: AlertComponent['variant'],
+  opts?: { title?: string; icon?: string; dismissible?: boolean; actions?: ButtonComponent[] },
+): AlertComponent {
+  return { component: 'Alert', text, variant, ...opts };
+}
+
+export function tabGroup(
+  tabs: TabItem[],
+  opts?: { title?: string },
+): TabGroupComponent {
+  return { component: 'TabGroup', tabs, ...opts };
+}
+
+export function notification(
+  message: string,
+  variant: NotificationComponent['variant'],
+  opts?: { icon?: string; duration?: number; showInline?: boolean },
+): NotificationComponent {
+  return { component: 'Notification', message, variant, ...opts };
+}
+
+export function tooltip(
+  text: string,
+  tip: string,
+  position?: TooltipComponent['position'],
+): TooltipComponent {
+  return { component: 'Tooltip', text, tooltip: tip, position };
+}
+
+export function statCard(
+  value: string,
+  label: string,
+  opts?: { icon?: string; trend?: StatCardComponent['trend'] },
+): StatCardComponent {
+  return { component: 'StatCard', value, label, ...opts };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // ACTION HELPERS
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -346,6 +404,12 @@ export const uiComponents = {
   divider,
   textBlock,
   carousel,
+  accordion,
+  alert,
+  tabGroup,
+  notification,
+  tooltip,
+  statCard,
   toolAction,
   messageAction,
   navigateAction,

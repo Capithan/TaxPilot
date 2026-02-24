@@ -171,6 +171,12 @@ class TaxPilotRenderer {
       case 'divider':           return this._renderDivider(c);
       case 'text_block':        return this._renderTextBlock(c);
       case 'carousel':          return this._renderCarousel(c);
+      case 'accordion':         return this._renderAccordion(c);
+      case 'tooltip':           return this._renderTooltip(c);
+      case 'notification':      return this._renderNotification(c);
+      case 'alert':             return this._renderAlert(c);
+      case 'tab_group':         return this._renderTabGroup(c);
+      case 'stat_card':         return this._renderStatCard(c);
       default:                  return `<!-- unknown component: ${c.type} -->`;
     }
   }
@@ -462,7 +468,6 @@ class TaxPilotRenderer {
   _renderAppointmentSummary(c) {
     const apt = c.appointment || {};
     const pro = c.taxPro || {};
-    const client = c.client || {};
     const extra = c.extras || {};
 
     const confId = extra.confirmationId
@@ -628,6 +633,166 @@ class TaxPilotRenderer {
       <button class="tp-carousel-nav tp-carousel-prev">&lsaquo;</button>
       <div class="tp-carousel-track" id="${cid}">${items}</div>
       <button class="tp-carousel-nav tp-carousel-next">&rsaquo;</button>
+    </div>`;
+  }
+
+  // ─── Accordion (BDS hrb-accordion pattern) ─────────────────
+  _renderAccordion(c) {
+    const items = (c.items || []).map((item, i) => {
+      const id = this._uid('acc');
+      const contentId = this._uid('accp');
+      const expanded = item.expanded ? 'true' : 'false';
+      const openClass = item.expanded ? ' tp-acc-item--open' : '';
+      const icon = item.icon ? `<span class="tp-acc-icon">${item.icon}</span>` : '';
+      const badge = item.badge ? `<span class="tp-badge tp-badge--info">${esc(item.badge)}</span>` : '';
+      const content = item.components
+        ? item.components.map(sub => this._renderComponent(sub)).join('')
+        : `<div class="tp-acc-text">${esc(item.content || '')}</div>`;
+
+      this._pendingBinds.push(el => {
+        const trigger = el.querySelector(`#${id}`);
+        if (trigger) trigger.addEventListener('click', () => {
+          const panel = el.querySelector(`#${contentId}`);
+          const parent = trigger.closest('.tp-acc-item');
+          const isOpen = parent.classList.toggle('tp-acc-item--open');
+          trigger.setAttribute('aria-expanded', isOpen);
+          panel.hidden = !isOpen;
+        });
+      });
+
+      return `<div class="tp-acc-item${openClass}">
+        <button id="${id}" class="tp-acc-trigger" aria-expanded="${expanded}" aria-controls="${contentId}">
+          ${icon}<span class="tp-acc-title">${esc(item.title)}</span>${badge}
+          <svg class="tp-acc-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div id="${contentId}" class="tp-acc-panel" role="region" ${item.expanded ? '' : 'hidden'}>
+          ${content}
+        </div>
+      </div>`;
+    }).join('');
+
+    const title = c.title ? `<div class="tp-acc-group-title">${esc(c.title)}</div>` : '';
+    return `<div class="tp-accordion">${title}${items}</div>`;
+  }
+
+  // ─── Tooltip (wraps child text with hover info) ───────────────
+  _renderTooltip(c) {
+    const position = c.position || 'top';
+    const text = c.text || '';
+    const tip = c.tooltip || '';
+    return `<span class="tp-tooltip">
+      <span>${esc(text)}</span>
+      <span class="tp-tooltip-text tp-tooltip--${position}">${esc(tip)}</span>
+    </span>`;
+  }
+
+  // ─── Notification (triggers a toast in the UI) ────────────────
+  _renderNotification(c) {
+    const type = c.variant || 'info';
+    const duration = c.duration || 4000;
+    // Fire the toast when this component is bound
+    this._pendingBinds.push(() => {
+      if (typeof showToast === 'function') {
+        showToast(c.message || c.text || '', type, duration);
+      }
+    });
+    // Also render an inline message if showInline is set
+    if (c.showInline) {
+      const icon = c.icon || '';
+      return `<div class="tp-banner tp-banner--${type}">
+        ${icon ? `<span class="tp-banner-icon">${icon}</span>` : ''}<span class="tp-banner-text">${esc(c.message || c.text || '')}</span>
+      </div>`;
+    }
+    return ''; // Toast-only, no inline content
+  }
+
+  // ─── Alert (inline alert box, distinct from banner) ───────────
+  _renderAlert(c) {
+    const v = c.variant || 'info';
+    const icon = c.icon ? `<span class="tp-alert-icon">${c.icon}</span>` : '';
+    const title = c.title ? `<div class="tp-alert-title">${esc(c.title)}</div>` : '';
+    const actions = (c.actions || []).map(a => this._renderComponent(a)).join('');
+    const dismissId = c.dismissible ? this._uid('adis') : null;
+    const dismiss = c.dismissible
+      ? `<button id="${dismissId}" class="tp-alert-dismiss" aria-label="Dismiss">&times;</button>`
+      : '';
+
+    if (dismissId) {
+      this._pendingBinds.push(el => {
+        const btn = el.querySelector(`#${dismissId}`);
+        if (btn) btn.addEventListener('click', () => {
+          btn.closest('.tp-alert').style.display = 'none';
+        });
+      });
+    }
+
+    return `<div class="tp-alert tp-alert--${v}" role="alert">
+      ${icon}
+      <div class="tp-alert-body">
+        ${title}
+        <div class="tp-alert-message">${esc(c.text || c.message || '')}</div>
+        ${actions ? `<div class="tp-alert-actions">${actions}</div>` : ''}
+      </div>
+      ${dismiss}
+    </div>`;
+  }
+
+  // ─── Tab Group ─────────────────────────────────────────────────
+  _renderTabGroup(c) {
+    const gid = this._uid('tabs');
+    const tabs = (c.tabs || []).map((tab, i) => {
+      const tid = this._uid('tab');
+      const pid = this._uid('tpanel');
+      const active = i === 0;
+      const content = (tab.components || []).map(sub => this._renderComponent(sub)).join('')
+        || `<div class="tp-text tp-text--body">${esc(tab.content || '')}</div>`;
+
+      this._pendingBinds.push(el => {
+        const tabBtn = el.querySelector(`#${tid}`);
+        if (tabBtn) tabBtn.addEventListener('click', () => {
+          // Deactivate siblings
+          const group = tabBtn.closest('.tp-tabs');
+          group.querySelectorAll('.tp-tab--active').forEach(t => t.classList.remove('tp-tab--active'));
+          group.querySelectorAll('.tp-tab-panel--active').forEach(p => {
+            p.classList.remove('tp-tab-panel--active');
+            p.hidden = true;
+          });
+          // Activate this tab
+          tabBtn.classList.add('tp-tab--active');
+          tabBtn.setAttribute('aria-selected', 'true');
+          const panel = group.querySelector(`#${pid}`);
+          if (panel) {
+            panel.classList.add('tp-tab-panel--active');
+            panel.hidden = false;
+          }
+        });
+      });
+
+      return {
+        tab: `<button id="${tid}" class="tp-tab${active ? ' tp-tab--active' : ''}" role="tab" aria-selected="${active}" aria-controls="${pid}">${tab.icon ? `<span class="tp-tab-icon">${tab.icon}</span>` : ''}${esc(tab.label)}</button>`,
+        panel: `<div id="${pid}" class="tp-tab-panel${active ? ' tp-tab-panel--active' : ''}" role="tabpanel" ${active ? '' : 'hidden'}>${content}</div>`,
+      };
+    });
+
+    const title = c.title ? `<div class="tp-tabs-title">${esc(c.title)}</div>` : '';
+    return `<div class="tp-tabs" data-group="${gid}">
+      ${title}
+      <div class="tp-tab-list" role="tablist">${tabs.map(t => t.tab).join('')}</div>
+      <div class="tp-tab-panels">${tabs.map(t => t.panel).join('')}</div>
+    </div>`;
+  }
+
+  // ─── Stat Card (key metric display) ───────────────────────────
+  _renderStatCard(c) {
+    const icon = c.icon ? `<span class="tp-stat-icon">${c.icon}</span>` : '';
+    const trend = c.trend
+      ? `<span class="tp-stat-trend tp-stat-trend--${c.trend.direction || 'neutral'}">${c.trend.direction === 'up' ? '↑' : c.trend.direction === 'down' ? '↓' : '→'} ${esc(c.trend.text || '')}</span>`
+      : '';
+    return `<div class="tp-stat-card">
+      ${icon}
+      <div class="tp-stat-value">${esc(c.value)}</div>
+      <div class="tp-stat-label">${esc(c.label)}</div>
+      ${trend}
     </div>`;
   }
 
