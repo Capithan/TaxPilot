@@ -66,9 +66,12 @@ import {
 } from '../ui/formatters/reminders.js';
 import type { UIResponse } from '../ui/types.js';
 
-/** Wrap a UIResponse into the MCP content block format. */
-function toMcpContent(uiResp: UIResponse): { content: Array<{ type: string; text: string }> } {
-  return { content: [{ type: 'text', text: JSON.stringify(uiResp, null, 2) }] };
+/** Wrap a UIResponse into the MCP content block format with structuredContent for Apps SDK widget. */
+function toMcpContent(uiResp: UIResponse): { content: Array<{ type: string; text: string }>; structuredContent: Record<string, unknown> } {
+  return {
+    content: [{ type: 'text', text: JSON.stringify(uiResp, null, 2) }],
+    structuredContent: uiResp as unknown as Record<string, unknown>,
+  };
 }
 
 // Get __dirname in ESM
@@ -445,27 +448,38 @@ app.get('/api/tools', (_req: Request, res: Response) => {
   res.json(mcpTools);
 });
 
-// Define available MCP tools with annotations (required by OpenAI Apps SDK)
+// ── MCP Apps Widget Resource URI ────────────────────────────────────────────
+const WIDGET_RESOURCE_URI = 'ui://taxpilot/widget.html';
+const WIDGET_MIME_TYPE = 'text/html;profile=mcp-app';
+
+/** Read the widget HTML from public/taxpilot-widget.html */
+function readWidgetHtml(): string {
+  const publicDir = path.join(__dirname, '..', '..', 'public');
+  const widgetPath = path.join(publicDir, 'taxpilot-widget.html');
+  return fs.readFileSync(widgetPath, 'utf-8');
+}
+
+// Define available MCP tools with annotations and UI metadata (MCP Apps SDK)
 const mcpTools = [
-  { name: 'start_intake', description: 'Start a new client intake session. DEMO MODE: Collects ALL data directly including SSN, bank details, W-2 info, and AGI. No external portals.', inputSchema: { type: 'object', properties: { clientId: { type: 'string', description: 'Optional existing client ID' } }, additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false } },
-  { name: 'process_intake_response', description: 'Process client response during intake. Accepts ALL information directly: SSN, DOB, bank routing/account numbers, W-2 details, prior year AGI, etc. No redirects to external systems.', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, answer: { type: 'string', description: 'Client response - can include any data: SSN, bank info, W-2 details, etc.' } }, required: ['sessionId', 'answer'], additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false } },
-  { name: 'get_intake_progress', description: 'Get intake session progress', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'], additionalProperties: false }, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false } },
-  { name: 'get_client_summary', description: 'Get complete client summary including all collected information', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'], additionalProperties: false }, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false } },
-  { name: 'generate_document_checklist', description: 'Generate personalized document checklist based on client tax situation', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'], additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false } },
-  { name: 'get_pending_documents', description: 'Get list of documents still needed from client', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'], additionalProperties: false }, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false } },
-  { name: 'route_to_tax_pro', description: 'Route client to the most appropriate tax professional based on their complexity and needs', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'], additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false } },
-  { name: 'get_appointment_estimate', description: 'Estimate appointment duration based on client complexity and preparation level', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'], additionalProperties: false }, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false } },
-  { name: 'create_appointment', description: 'Create and book an appointment for a client with a tax professional', inputSchema: { type: 'object', properties: { clientId: { type: 'string', description: 'Client ID' }, taxProId: { type: 'string', description: 'Tax professional ID (from route_to_tax_pro)' }, scheduledAt: { type: 'string', description: 'Appointment time in ISO format (e.g., 2026-01-20T10:00:00)' }, type: { type: 'string', enum: ['virtual', 'in_person'], description: 'Appointment type (default: virtual)' } }, required: ['clientId', 'taxProId', 'scheduledAt'], additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false } },
-  { name: 'create_reminder', description: 'Create reminders for a client about all pending documents', inputSchema: { type: 'object', properties: { clientId: { type: 'string' }, appointmentId: { type: 'string', description: 'Optional appointment ID to link reminders to' } }, required: ['clientId'], additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false } },
-  { name: 'send_reminder', description: 'Send a reminder notification to a client (simulated in demo mode)', inputSchema: { type: 'object', properties: { reminderId: { type: 'string' } }, required: ['reminderId'], additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true } },
-  { name: 'get_client_reminders', description: 'Get all reminders for a client', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'], additionalProperties: false }, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false } },
-  { name: 'send_client_notification', description: 'Send a custom notification/email to a client (simulated in demo mode)', inputSchema: { type: 'object', properties: { clientId: { type: 'string' }, subject: { type: 'string' }, message: { type: 'string' }, notificationType: { type: 'string', enum: ['email', 'sms'], description: 'Notification channel' } }, required: ['clientId', 'subject', 'message'], additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true } },
-  { name: 'mark_document_collected', description: 'Mark a document as collected/received from client', inputSchema: { type: 'object', properties: { clientId: { type: 'string' }, documentId: { type: 'string' } }, required: ['clientId', 'documentId'], additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false } },
-  { name: 'get_tax_pro_recommendations', description: 'Get list of recommended tax professionals for a client based on their tax situation', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'], additionalProperties: false }, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false } },
+  { name: 'start_intake', description: 'Start a new client intake session. DEMO MODE: Collects ALL data directly including SSN, bank details, W-2 info, and AGI. No external portals.', inputSchema: { type: 'object', properties: { clientId: { type: 'string', description: 'Optional existing client ID' } }, additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, _meta: { ui: { resourceUri: WIDGET_RESOURCE_URI }, 'ui/resourceUri': WIDGET_RESOURCE_URI } },
+  { name: 'process_intake_response', description: 'Process client response during intake. Accepts ALL information directly: SSN, DOB, bank routing/account numbers, W-2 details, prior year AGI, etc. No redirects to external systems.', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, answer: { type: 'string', description: 'Client response - can include any data: SSN, bank info, W-2 details, etc.' } }, required: ['sessionId', 'answer'], additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, _meta: { ui: { resourceUri: WIDGET_RESOURCE_URI }, 'ui/resourceUri': WIDGET_RESOURCE_URI } },
+  { name: 'get_intake_progress', description: 'Get intake session progress', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'], additionalProperties: false }, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }, _meta: { ui: { resourceUri: WIDGET_RESOURCE_URI }, 'ui/resourceUri': WIDGET_RESOURCE_URI } },
+  { name: 'get_client_summary', description: 'Get complete client summary including all collected information', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'], additionalProperties: false }, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }, _meta: { ui: { resourceUri: WIDGET_RESOURCE_URI }, 'ui/resourceUri': WIDGET_RESOURCE_URI } },
+  { name: 'generate_document_checklist', description: 'Generate personalized document checklist based on client tax situation', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'], additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, _meta: { ui: { resourceUri: WIDGET_RESOURCE_URI }, 'ui/resourceUri': WIDGET_RESOURCE_URI } },
+  { name: 'get_pending_documents', description: 'Get list of documents still needed from client', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'], additionalProperties: false }, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }, _meta: { ui: { resourceUri: WIDGET_RESOURCE_URI }, 'ui/resourceUri': WIDGET_RESOURCE_URI } },
+  { name: 'route_to_tax_pro', description: 'Route client to the most appropriate tax professional based on their complexity and needs', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'], additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, _meta: { ui: { resourceUri: WIDGET_RESOURCE_URI }, 'ui/resourceUri': WIDGET_RESOURCE_URI } },
+  { name: 'get_appointment_estimate', description: 'Estimate appointment duration based on client complexity and preparation level', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'], additionalProperties: false }, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }, _meta: { ui: { resourceUri: WIDGET_RESOURCE_URI }, 'ui/resourceUri': WIDGET_RESOURCE_URI } },
+  { name: 'create_appointment', description: 'Create and book an appointment for a client with a tax professional', inputSchema: { type: 'object', properties: { clientId: { type: 'string', description: 'Client ID' }, taxProId: { type: 'string', description: 'Tax professional ID (from route_to_tax_pro)' }, scheduledAt: { type: 'string', description: 'Appointment time in ISO format (e.g., 2026-01-20T10:00:00)' }, type: { type: 'string', enum: ['virtual', 'in_person'], description: 'Appointment type (default: virtual)' } }, required: ['clientId', 'taxProId', 'scheduledAt'], additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, _meta: { ui: { resourceUri: WIDGET_RESOURCE_URI }, 'ui/resourceUri': WIDGET_RESOURCE_URI } },
+  { name: 'create_reminder', description: 'Create reminders for a client about all pending documents', inputSchema: { type: 'object', properties: { clientId: { type: 'string' }, appointmentId: { type: 'string', description: 'Optional appointment ID to link reminders to' } }, required: ['clientId'], additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, _meta: { ui: { resourceUri: WIDGET_RESOURCE_URI }, 'ui/resourceUri': WIDGET_RESOURCE_URI } },
+  { name: 'send_reminder', description: 'Send a reminder notification to a client (simulated in demo mode)', inputSchema: { type: 'object', properties: { reminderId: { type: 'string' } }, required: ['reminderId'], additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true }, _meta: { ui: { resourceUri: WIDGET_RESOURCE_URI }, 'ui/resourceUri': WIDGET_RESOURCE_URI } },
+  { name: 'get_client_reminders', description: 'Get all reminders for a client', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'], additionalProperties: false }, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }, _meta: { ui: { resourceUri: WIDGET_RESOURCE_URI }, 'ui/resourceUri': WIDGET_RESOURCE_URI } },
+  { name: 'send_client_notification', description: 'Send a custom notification/email to a client (simulated in demo mode)', inputSchema: { type: 'object', properties: { clientId: { type: 'string' }, subject: { type: 'string' }, message: { type: 'string' }, notificationType: { type: 'string', enum: ['email', 'sms'], description: 'Notification channel' } }, required: ['clientId', 'subject', 'message'], additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true }, _meta: { ui: { resourceUri: WIDGET_RESOURCE_URI }, 'ui/resourceUri': WIDGET_RESOURCE_URI } },
+  { name: 'mark_document_collected', description: 'Mark a document as collected/received from client', inputSchema: { type: 'object', properties: { clientId: { type: 'string' }, documentId: { type: 'string' } }, required: ['clientId', 'documentId'], additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, _meta: { ui: { resourceUri: WIDGET_RESOURCE_URI }, 'ui/resourceUri': WIDGET_RESOURCE_URI } },
+  { name: 'get_tax_pro_recommendations', description: 'Get list of recommended tax professionals for a client based on their tax situation', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'], additionalProperties: false }, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }, _meta: { ui: { resourceUri: WIDGET_RESOURCE_URI }, 'ui/resourceUri': WIDGET_RESOURCE_URI } },
 ];
 
-// Handle MCP tool calls — returns structured UIResponse via formatters
-function handleToolCall(name: string, args: Record<string, unknown>): { content: Array<{ type: string; text: string }> } {
+// Handle MCP tool calls — returns structured UIResponse via formatters + structuredContent for MCP Apps widget
+function handleToolCall(name: string, args: Record<string, unknown>): { content: Array<{ type: string; text: string }>; structuredContent?: Record<string, unknown> } {
   try {
     switch (name) {
       case 'start_intake': {
@@ -630,7 +644,8 @@ app.post('/sse', (req: Request, res: Response) => {
         protocolVersion: clientVersion,
         serverInfo: { name: 'tax-intake-mcp', version: '1.0.0' },
         capabilities: { 
-          tools: { listChanged: false }
+          tools: { listChanged: false },
+          resources: { listChanged: false }
         }
       }
     });
@@ -667,14 +682,58 @@ app.post('/sse', (req: Request, res: Response) => {
     return;
   }
   
-  // Handle resources/list - return empty (we don't have resources)
+  // Handle resources/list - return the widget resource for MCP Apps
   if (method === 'resources/list') {
     res.setHeader('Content-Type', 'application/json');
     res.json({
       jsonrpc: '2.0',
       id,
-      result: { resources: [] }
+      result: {
+        resources: [{
+          name: 'TaxPilot Widget',
+          uri: WIDGET_RESOURCE_URI,
+          mimeType: WIDGET_MIME_TYPE,
+          description: 'H&R Block TaxPilot interactive UI widget',
+        }]
+      }
     });
+    return;
+  }
+  
+  // Handle resources/read - return the widget HTML
+  if (method === 'resources/read') {
+    const uri = params?.uri;
+    if (uri === WIDGET_RESOURCE_URI) {
+      try {
+        const html = readWidgetHtml();
+        res.setHeader('Content-Type', 'application/json');
+        res.json({
+          jsonrpc: '2.0',
+          id,
+          result: {
+            contents: [{
+              uri: WIDGET_RESOURCE_URI,
+              mimeType: WIDGET_MIME_TYPE,
+              text: html,
+            }]
+          }
+        });
+      } catch (e) {
+        res.setHeader('Content-Type', 'application/json');
+        res.json({
+          jsonrpc: '2.0',
+          id,
+          error: { code: -32603, message: 'Failed to read widget HTML' }
+        });
+      }
+    } else {
+      res.setHeader('Content-Type', 'application/json');
+      res.json({
+        jsonrpc: '2.0',
+        id,
+        error: { code: -32602, message: `Unknown resource: ${uri}` }
+      });
+    }
     return;
   }
   
@@ -780,7 +839,7 @@ app.post('/messages', (req: Request, res: Response) => {
         result: {
           protocolVersion: params?.protocolVersion || '2025-03-26',
           serverInfo: { name: 'tax-intake-mcp', version: '1.0.0' },
-          capabilities: { tools: { listChanged: false } }
+          capabilities: { tools: { listChanged: false }, resources: { listChanged: false } }
         }
       };
       break;
@@ -811,9 +870,41 @@ app.post('/messages', (req: Request, res: Response) => {
       response = {
         jsonrpc: '2.0',
         id,
-        result: { resources: [] }
+        result: {
+          resources: [{
+            name: 'TaxPilot Widget',
+            uri: WIDGET_RESOURCE_URI,
+            mimeType: WIDGET_MIME_TYPE,
+            description: 'H&R Block TaxPilot interactive UI widget',
+          }]
+        }
       };
       break;
+
+    case 'resources/read': {
+      const readUri = params?.uri;
+      if (readUri === WIDGET_RESOURCE_URI) {
+        try {
+          const html = readWidgetHtml();
+          response = {
+            jsonrpc: '2.0',
+            id,
+            result: {
+              contents: [{
+                uri: WIDGET_RESOURCE_URI,
+                mimeType: WIDGET_MIME_TYPE,
+                text: html,
+              }]
+            }
+          };
+        } catch {
+          response = { jsonrpc: '2.0', id, error: { code: -32603, message: 'Failed to read widget' } };
+        }
+      } else {
+        response = { jsonrpc: '2.0', id, error: { code: -32602, message: `Unknown resource: ${readUri}` } };
+      }
+      break;
+    }
 
     case 'prompts/list':
       response = {

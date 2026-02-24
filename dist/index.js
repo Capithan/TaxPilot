@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { CallToolRequestSchema, ListToolsRequestSchema, ListPromptsRequestSchema, GetPromptRequestSchema, } from '@modelcontextprotocol/sdk/types.js';
+import { CallToolRequestSchema, ListToolsRequestSchema, ListPromptsRequestSchema, GetPromptRequestSchema, ListResourcesRequestSchema, ReadResourceRequestSchema, } from '@modelcontextprotocol/sdk/types.js';
 import { startIntakeSession, processIntakeResponse, getIntakeProgress, getIntakeSummary, } from './services/intake.js';
 import { generateDocumentChecklist, getDocumentChecklist, markDocumentCollected, getPendingDocuments, } from './services/checklist.js';
 import { createDocumentReminder, getClientReminders, sendReminder, scheduleAppointmentReminders, } from './services/reminders.js';
@@ -14,9 +14,14 @@ import { formatDocumentChecklist, formatDocumentCollected, formatPendingDocument
 import { formatComplexityScore, formatRoutingResult, formatTaxProRecommendations, formatAppointmentEstimate, formatAppointmentCreated, formatTaxProList, formatClientProfile, } from './ui/formatters/routing.js';
 import { formatRemindersCreated, formatRemindersList, formatReminderSent, } from './ui/formatters/reminders.js';
 import { formatFlowStatus, formatFlowAdvanced, formatSummaryConfirmed, formatSchedulingPreferences, formatTaxProSelected, formatFlowProgress, } from './ui/formatters/flow.js';
-/** Wrap a UIResponse into the MCP content block format. */
+/** MCP Apps Widget resource URI */
+const WIDGET_RESOURCE_URI = 'ui://taxpilot/widget.html';
+/** Wrap a UIResponse into the MCP content block format with structuredContent for Apps SDK. */
 function toMcpContent(uiResp) {
-    return { content: [{ type: 'text', text: JSON.stringify(uiResp, null, 2) }] };
+    return {
+        content: [{ type: 'text', text: JSON.stringify(uiResp, null, 2) }],
+        structuredContent: uiResp,
+    };
 }
 // Create the MCP server
 const server = new Server({
@@ -26,405 +31,445 @@ const server = new Server({
     capabilities: {
         tools: {},
         prompts: {},
+        resources: {},
     },
 });
-// Define all available tools
+// Define all available tools (with MCP Apps UI metadata injected)
 server.setRequestHandler(ListToolsRequestSchema, async () => {
+    const rawTools = [
+        // Intake Tools
+        {
+            name: 'start_intake',
+            description: 'Start a new client intake session or resume an existing one. This begins the conversational intake process to collect ALL necessary information directly in this conversation - including SSN, bank details, W-2 data, and prior year AGI. This is a demo environment with no external portals.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    clientId: {
+                        type: 'string',
+                        description: 'Optional existing client ID to resume intake',
+                    },
+                },
+                required: [],
+            },
+        },
+        {
+            name: 'process_intake_response',
+            description: 'Process a client response during the intake conversation. Send the client\'s answer to continue gathering information. Accepts ALL data directly including sensitive information like SSN, bank details, W-2 specifics, and prior year AGI. No external portals or redirects.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    sessionId: {
+                        type: 'string',
+                        description: 'The intake session ID',
+                    },
+                    answer: {
+                        type: 'string',
+                        description: 'The client\'s response - can include any information: personal details, SSN, bank info, W-2 data, etc.',
+                    },
+                },
+                required: ['sessionId', 'answer'],
+            },
+        },
+        {
+            name: 'get_intake_progress',
+            description: 'Get the current progress of an intake session, including completed steps and remaining questions.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    sessionId: {
+                        type: 'string',
+                        description: 'The intake session ID',
+                    },
+                },
+                required: ['sessionId'],
+            },
+        },
+        {
+            name: 'get_client_summary',
+            description: 'Get a complete summary of a client\'s intake information, including personal details, income types, deductions, and special situations.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    clientId: {
+                        type: 'string',
+                        description: 'The client ID',
+                    },
+                },
+                required: ['clientId'],
+            },
+        },
+        // Document Checklist Tools
+        {
+            name: 'generate_document_checklist',
+            description: 'Generate a personalized document checklist based on the client\'s tax situation. This analyzes income types, deductions, and special situations to create a tailored list of required documents.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    clientId: {
+                        type: 'string',
+                        description: 'The client ID',
+                    },
+                },
+                required: ['clientId'],
+            },
+        },
+        {
+            name: 'get_document_checklist',
+            description: 'Retrieve the current document checklist for a client, showing which documents have been collected and which are still pending.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    clientId: {
+                        type: 'string',
+                        description: 'The client ID',
+                    },
+                },
+                required: ['clientId'],
+            },
+        },
+        {
+            name: 'mark_document_collected',
+            description: 'Mark a specific document as collected/received from the client.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    clientId: {
+                        type: 'string',
+                        description: 'The client ID',
+                    },
+                    documentId: {
+                        type: 'string',
+                        description: 'The document ID to mark as collected',
+                    },
+                },
+                required: ['clientId', 'documentId'],
+            },
+        },
+        {
+            name: 'get_pending_documents',
+            description: 'Get a list of required documents that the client has not yet provided.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    clientId: {
+                        type: 'string',
+                        description: 'The client ID',
+                    },
+                },
+                required: ['clientId'],
+            },
+        },
+        // Reminder Tools
+        {
+            name: 'create_document_reminders',
+            description: 'Create personalized reminders for pending documents. Generates contextual messages like "Don\'t forget your 1099-NEC from Uber".',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    clientId: {
+                        type: 'string',
+                        description: 'The client ID',
+                    },
+                    appointmentId: {
+                        type: 'string',
+                        description: 'The appointment ID to associate reminders with',
+                    },
+                },
+                required: ['clientId', 'appointmentId'],
+            },
+        },
+        {
+            name: 'get_client_reminders',
+            description: 'Get all scheduled and sent reminders for a client.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    clientId: {
+                        type: 'string',
+                        description: 'The client ID',
+                    },
+                },
+                required: ['clientId'],
+            },
+        },
+        {
+            name: 'send_reminder',
+            description: 'Send a specific reminder to the client via email/SMS.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    reminderId: {
+                        type: 'string',
+                        description: 'The reminder ID to send',
+                    },
+                },
+                required: ['reminderId'],
+            },
+        },
+        // Routing Tools
+        {
+            name: 'calculate_complexity',
+            description: 'Calculate the complexity score for a client\'s tax situation. Returns a score from 0-100 and a complexity level (simple, moderate, complex, expert).',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    clientId: {
+                        type: 'string',
+                        description: 'The client ID',
+                    },
+                },
+                required: ['clientId'],
+            },
+        },
+        {
+            name: 'route_to_tax_pro',
+            description: 'Automatically route a client to the best-matched tax professional based on their complexity level and required specializations.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    clientId: {
+                        type: 'string',
+                        description: 'The client ID',
+                    },
+                },
+                required: ['clientId'],
+            },
+        },
+        {
+            name: 'get_tax_pro_recommendations',
+            description: 'Get recommended tax professionals for a client without automatically assigning one.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    clientId: {
+                        type: 'string',
+                        description: 'The client ID',
+                    },
+                },
+                required: ['clientId'],
+            },
+        },
+        {
+            name: 'create_appointment',
+            description: 'Create an appointment for a client with a specific tax professional.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    clientId: {
+                        type: 'string',
+                        description: 'The client ID',
+                    },
+                    taxProId: {
+                        type: 'string',
+                        description: 'The tax professional ID',
+                    },
+                    scheduledAt: {
+                        type: 'string',
+                        description: 'The appointment date and time (ISO 8601 format)',
+                    },
+                    type: {
+                        type: 'string',
+                        enum: ['virtual', 'in_person'],
+                        description: 'The type of appointment',
+                    },
+                },
+                required: ['clientId', 'taxProId', 'scheduledAt'],
+            },
+        },
+        {
+            name: 'get_appointment_estimate',
+            description: 'Get an estimate of appointment duration and time savings based on intake completion status.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    clientId: {
+                        type: 'string',
+                        description: 'The client ID',
+                    },
+                },
+                required: ['clientId'],
+            },
+        },
+        // ============================================
+        // CONVERSATION FLOW MANAGEMENT TOOLS
+        // ============================================
+        {
+            name: 'get_conversation_flow',
+            description: 'Get the current conversation flow state and instructions for what to do next. ALWAYS call this tool at the start of a conversation and after completing any major action to understand where you are in the flow and what should happen next. This ensures consistent flow across all conversations.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    clientId: {
+                        type: 'string',
+                        description: 'The client ID',
+                    },
+                    sessionId: {
+                        type: 'string',
+                        description: 'The intake session ID',
+                    },
+                },
+                required: ['clientId'],
+            },
+        },
+        {
+            name: 'advance_conversation_flow',
+            description: 'Mark the current flow stage as complete and advance to the next stage. Call this after completing the required actions for a stage. Optionally include stage-specific data.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    clientId: {
+                        type: 'string',
+                        description: 'The client ID',
+                    },
+                    stageData: {
+                        type: 'object',
+                        description: 'Optional data to store for the current stage (e.g., { "shown": true } for summary_review)',
+                    },
+                },
+                required: ['clientId'],
+            },
+        },
+        {
+            name: 'confirm_intake_summary',
+            description: 'Mark the intake summary as confirmed by the user. Call this when the user explicitly confirms their information is correct. This advances the flow from summary_confirmation to document_checklist.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    clientId: {
+                        type: 'string',
+                        description: 'The client ID',
+                    },
+                },
+                required: ['clientId'],
+            },
+        },
+        {
+            name: 'set_scheduling_preferences',
+            description: 'Record the user\'s scheduling preferences. Call this after collecting their preferred dates, times, and appointment type.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    clientId: {
+                        type: 'string',
+                        description: 'The client ID',
+                    },
+                    preferredDates: {
+                        type: 'array',
+                        items: { type: 'string' },
+                        description: 'List of preferred dates (e.g., ["2026-01-25", "2026-01-26"])',
+                    },
+                    preferredTimes: {
+                        type: 'array',
+                        items: { type: 'string' },
+                        description: 'List of preferred times (e.g., ["morning", "afternoon", "10:00 AM"])',
+                    },
+                    appointmentType: {
+                        type: 'string',
+                        enum: ['virtual', 'in_person'],
+                        description: 'Preferred appointment type',
+                    },
+                },
+                required: ['clientId', 'preferredDates', 'preferredTimes', 'appointmentType'],
+            },
+        },
+        {
+            name: 'select_tax_professional',
+            description: 'Record the selected tax professional for the client. Call this after routing or when user accepts a recommended tax pro.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    clientId: {
+                        type: 'string',
+                        description: 'The client ID',
+                    },
+                    taxProId: {
+                        type: 'string',
+                        description: 'The selected tax professional ID',
+                    },
+                },
+                required: ['clientId', 'taxProId'],
+            },
+        },
+        {
+            name: 'get_flow_progress',
+            description: 'Get a visual display of the conversation flow progress showing completed, current, and remaining stages.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    clientId: {
+                        type: 'string',
+                        description: 'The client ID',
+                    },
+                },
+                required: ['clientId'],
+            },
+        },
+        // Utility Tools
+        {
+            name: 'list_tax_professionals',
+            description: 'List all available tax professionals with their specializations and current availability.',
+            inputSchema: {
+                type: 'object',
+                properties: {},
+                required: [],
+            },
+        },
+        {
+            name: 'get_client',
+            description: 'Get complete client profile information.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    clientId: {
+                        type: 'string',
+                        description: 'The client ID',
+                    },
+                },
+                required: ['clientId'],
+            },
+        },
+    ];
+    // Inject MCP Apps UI metadata into all tools
+    const tools = rawTools.map(tool => ({
+        ...tool,
+        _meta: {
+            ui: { resourceUri: WIDGET_RESOURCE_URI },
+            'ui/resourceUri': WIDGET_RESOURCE_URI,
+        },
+    }));
+    return { tools };
+});
+// Handle resource listing (MCP Apps widget)
+server.setRequestHandler(ListResourcesRequestSchema, async () => {
     return {
-        tools: [
-            // Intake Tools
-            {
-                name: 'start_intake',
-                description: 'Start a new client intake session or resume an existing one. This begins the conversational intake process to collect ALL necessary information directly in this conversation - including SSN, bank details, W-2 data, and prior year AGI. This is a demo environment with no external portals.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        clientId: {
-                            type: 'string',
-                            description: 'Optional existing client ID to resume intake',
-                        },
-                    },
-                    required: [],
-                },
-            },
-            {
-                name: 'process_intake_response',
-                description: 'Process a client response during the intake conversation. Send the client\'s answer to continue gathering information. Accepts ALL data directly including sensitive information like SSN, bank details, W-2 specifics, and prior year AGI. No external portals or redirects.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        sessionId: {
-                            type: 'string',
-                            description: 'The intake session ID',
-                        },
-                        answer: {
-                            type: 'string',
-                            description: 'The client\'s response - can include any information: personal details, SSN, bank info, W-2 data, etc.',
-                        },
-                    },
-                    required: ['sessionId', 'answer'],
-                },
-            },
-            {
-                name: 'get_intake_progress',
-                description: 'Get the current progress of an intake session, including completed steps and remaining questions.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        sessionId: {
-                            type: 'string',
-                            description: 'The intake session ID',
-                        },
-                    },
-                    required: ['sessionId'],
-                },
-            },
-            {
-                name: 'get_client_summary',
-                description: 'Get a complete summary of a client\'s intake information, including personal details, income types, deductions, and special situations.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        clientId: {
-                            type: 'string',
-                            description: 'The client ID',
-                        },
-                    },
-                    required: ['clientId'],
-                },
-            },
-            // Document Checklist Tools
-            {
-                name: 'generate_document_checklist',
-                description: 'Generate a personalized document checklist based on the client\'s tax situation. This analyzes income types, deductions, and special situations to create a tailored list of required documents.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        clientId: {
-                            type: 'string',
-                            description: 'The client ID',
-                        },
-                    },
-                    required: ['clientId'],
-                },
-            },
-            {
-                name: 'get_document_checklist',
-                description: 'Retrieve the current document checklist for a client, showing which documents have been collected and which are still pending.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        clientId: {
-                            type: 'string',
-                            description: 'The client ID',
-                        },
-                    },
-                    required: ['clientId'],
-                },
-            },
-            {
-                name: 'mark_document_collected',
-                description: 'Mark a specific document as collected/received from the client.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        clientId: {
-                            type: 'string',
-                            description: 'The client ID',
-                        },
-                        documentId: {
-                            type: 'string',
-                            description: 'The document ID to mark as collected',
-                        },
-                    },
-                    required: ['clientId', 'documentId'],
-                },
-            },
-            {
-                name: 'get_pending_documents',
-                description: 'Get a list of required documents that the client has not yet provided.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        clientId: {
-                            type: 'string',
-                            description: 'The client ID',
-                        },
-                    },
-                    required: ['clientId'],
-                },
-            },
-            // Reminder Tools
-            {
-                name: 'create_document_reminders',
-                description: 'Create personalized reminders for pending documents. Generates contextual messages like "Don\'t forget your 1099-NEC from Uber".',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        clientId: {
-                            type: 'string',
-                            description: 'The client ID',
-                        },
-                        appointmentId: {
-                            type: 'string',
-                            description: 'The appointment ID to associate reminders with',
-                        },
-                    },
-                    required: ['clientId', 'appointmentId'],
-                },
-            },
-            {
-                name: 'get_client_reminders',
-                description: 'Get all scheduled and sent reminders for a client.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        clientId: {
-                            type: 'string',
-                            description: 'The client ID',
-                        },
-                    },
-                    required: ['clientId'],
-                },
-            },
-            {
-                name: 'send_reminder',
-                description: 'Send a specific reminder to the client via email/SMS.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        reminderId: {
-                            type: 'string',
-                            description: 'The reminder ID to send',
-                        },
-                    },
-                    required: ['reminderId'],
-                },
-            },
-            // Routing Tools
-            {
-                name: 'calculate_complexity',
-                description: 'Calculate the complexity score for a client\'s tax situation. Returns a score from 0-100 and a complexity level (simple, moderate, complex, expert).',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        clientId: {
-                            type: 'string',
-                            description: 'The client ID',
-                        },
-                    },
-                    required: ['clientId'],
-                },
-            },
-            {
-                name: 'route_to_tax_pro',
-                description: 'Automatically route a client to the best-matched tax professional based on their complexity level and required specializations.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        clientId: {
-                            type: 'string',
-                            description: 'The client ID',
-                        },
-                    },
-                    required: ['clientId'],
-                },
-            },
-            {
-                name: 'get_tax_pro_recommendations',
-                description: 'Get recommended tax professionals for a client without automatically assigning one.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        clientId: {
-                            type: 'string',
-                            description: 'The client ID',
-                        },
-                    },
-                    required: ['clientId'],
-                },
-            },
-            {
-                name: 'create_appointment',
-                description: 'Create an appointment for a client with a specific tax professional.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        clientId: {
-                            type: 'string',
-                            description: 'The client ID',
-                        },
-                        taxProId: {
-                            type: 'string',
-                            description: 'The tax professional ID',
-                        },
-                        scheduledAt: {
-                            type: 'string',
-                            description: 'The appointment date and time (ISO 8601 format)',
-                        },
-                        type: {
-                            type: 'string',
-                            enum: ['virtual', 'in_person'],
-                            description: 'The type of appointment',
-                        },
-                    },
-                    required: ['clientId', 'taxProId', 'scheduledAt'],
-                },
-            },
-            {
-                name: 'get_appointment_estimate',
-                description: 'Get an estimate of appointment duration and time savings based on intake completion status.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        clientId: {
-                            type: 'string',
-                            description: 'The client ID',
-                        },
-                    },
-                    required: ['clientId'],
-                },
-            },
-            // ============================================
-            // CONVERSATION FLOW MANAGEMENT TOOLS
-            // ============================================
-            {
-                name: 'get_conversation_flow',
-                description: 'Get the current conversation flow state and instructions for what to do next. ALWAYS call this tool at the start of a conversation and after completing any major action to understand where you are in the flow and what should happen next. This ensures consistent flow across all conversations.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        clientId: {
-                            type: 'string',
-                            description: 'The client ID',
-                        },
-                        sessionId: {
-                            type: 'string',
-                            description: 'The intake session ID',
-                        },
-                    },
-                    required: ['clientId'],
-                },
-            },
-            {
-                name: 'advance_conversation_flow',
-                description: 'Mark the current flow stage as complete and advance to the next stage. Call this after completing the required actions for a stage. Optionally include stage-specific data.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        clientId: {
-                            type: 'string',
-                            description: 'The client ID',
-                        },
-                        stageData: {
-                            type: 'object',
-                            description: 'Optional data to store for the current stage (e.g., { "shown": true } for summary_review)',
-                        },
-                    },
-                    required: ['clientId'],
-                },
-            },
-            {
-                name: 'confirm_intake_summary',
-                description: 'Mark the intake summary as confirmed by the user. Call this when the user explicitly confirms their information is correct. This advances the flow from summary_confirmation to document_checklist.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        clientId: {
-                            type: 'string',
-                            description: 'The client ID',
-                        },
-                    },
-                    required: ['clientId'],
-                },
-            },
-            {
-                name: 'set_scheduling_preferences',
-                description: 'Record the user\'s scheduling preferences. Call this after collecting their preferred dates, times, and appointment type.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        clientId: {
-                            type: 'string',
-                            description: 'The client ID',
-                        },
-                        preferredDates: {
-                            type: 'array',
-                            items: { type: 'string' },
-                            description: 'List of preferred dates (e.g., ["2026-01-25", "2026-01-26"])',
-                        },
-                        preferredTimes: {
-                            type: 'array',
-                            items: { type: 'string' },
-                            description: 'List of preferred times (e.g., ["morning", "afternoon", "10:00 AM"])',
-                        },
-                        appointmentType: {
-                            type: 'string',
-                            enum: ['virtual', 'in_person'],
-                            description: 'Preferred appointment type',
-                        },
-                    },
-                    required: ['clientId', 'preferredDates', 'preferredTimes', 'appointmentType'],
-                },
-            },
-            {
-                name: 'select_tax_professional',
-                description: 'Record the selected tax professional for the client. Call this after routing or when user accepts a recommended tax pro.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        clientId: {
-                            type: 'string',
-                            description: 'The client ID',
-                        },
-                        taxProId: {
-                            type: 'string',
-                            description: 'The selected tax professional ID',
-                        },
-                    },
-                    required: ['clientId', 'taxProId'],
-                },
-            },
-            {
-                name: 'get_flow_progress',
-                description: 'Get a visual display of the conversation flow progress showing completed, current, and remaining stages.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        clientId: {
-                            type: 'string',
-                            description: 'The client ID',
-                        },
-                    },
-                    required: ['clientId'],
-                },
-            },
-            // Utility Tools
-            {
-                name: 'list_tax_professionals',
-                description: 'List all available tax professionals with their specializations and current availability.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {},
-                    required: [],
-                },
-            },
-            {
-                name: 'get_client',
-                description: 'Get complete client profile information.',
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        clientId: {
-                            type: 'string',
-                            description: 'The client ID',
-                        },
-                    },
-                    required: ['clientId'],
-                },
-            },
-        ],
+        resources: [{
+                name: 'TaxPilot Widget',
+                uri: WIDGET_RESOURCE_URI,
+                mimeType: 'text/html;profile=mcp-app',
+                description: 'H&R Block TaxPilot interactive UI widget',
+            }],
     };
+});
+// Handle resource reading (serve the widget HTML)
+server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+    const { uri } = request.params;
+    if (uri === WIDGET_RESOURCE_URI) {
+        // Read widget HTML from public/ directory
+        const { readFileSync } = await import('fs');
+        const { join, dirname } = await import('path');
+        const { fileURLToPath } = await import('url');
+        const thisDir = dirname(fileURLToPath(import.meta.url));
+        const widgetPath = join(thisDir, '..', 'public', 'taxpilot-widget.html');
+        const html = readFileSync(widgetPath, 'utf-8');
+        return {
+            contents: [{
+                    uri: WIDGET_RESOURCE_URI,
+                    mimeType: 'text/html;profile=mcp-app',
+                    text: html,
+                }],
+        };
+    }
+    throw new Error(`Unknown resource: ${uri}`);
 });
 // Handle tool calls
 server.setRequestHandler(CallToolRequestSchema, async (request) => {

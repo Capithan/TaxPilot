@@ -7,6 +7,8 @@ import {
   ListToolsRequestSchema,
   ListPromptsRequestSchema,
   GetPromptRequestSchema,
+  ListResourcesRequestSchema,
+  ReadResourceRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 
 import {
@@ -91,9 +93,15 @@ import {
 
 import type { UIResponse } from './ui/types.js';
 
-/** Wrap a UIResponse into the MCP content block format. */
-function toMcpContent(uiResp: UIResponse): { content: Array<{ type: 'text'; text: string }> } {
-  return { content: [{ type: 'text' as const, text: JSON.stringify(uiResp, null, 2) }] };
+/** MCP Apps Widget resource URI */
+const WIDGET_RESOURCE_URI = 'ui://taxpilot/widget.html';
+
+/** Wrap a UIResponse into the MCP content block format with structuredContent for Apps SDK. */
+function toMcpContent(uiResp: UIResponse): { content: Array<{ type: 'text'; text: string }>; structuredContent: Record<string, unknown> } {
+  return {
+    content: [{ type: 'text' as const, text: JSON.stringify(uiResp, null, 2) }],
+    structuredContent: uiResp as unknown as Record<string, unknown>,
+  };
 }
 
 // Create the MCP server
@@ -106,14 +114,14 @@ const server = new Server(
     capabilities: {
       tools: {},
       prompts: {},
+      resources: {},
     },
   }
 );
 
-// Define all available tools
+// Define all available tools (with MCP Apps UI metadata injected)
 server.setRequestHandler(ListToolsRequestSchema, async () => {
-  return {
-    tools: [
+  const rawTools = [
       // Intake Tools
       {
         name: 'start_intake',
@@ -510,8 +518,52 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ['clientId'],
         },
       },
-    ],
+    ];
+
+  // Inject MCP Apps UI metadata into all tools
+  const tools = rawTools.map(tool => ({
+    ...tool,
+    _meta: {
+      ui: { resourceUri: WIDGET_RESOURCE_URI },
+      'ui/resourceUri': WIDGET_RESOURCE_URI,
+    },
+  }));
+
+  return { tools };
+});
+
+// Handle resource listing (MCP Apps widget)
+server.setRequestHandler(ListResourcesRequestSchema, async () => {
+  return {
+    resources: [{
+      name: 'TaxPilot Widget',
+      uri: WIDGET_RESOURCE_URI,
+      mimeType: 'text/html;profile=mcp-app',
+      description: 'H&R Block TaxPilot interactive UI widget',
+    }],
   };
+});
+
+// Handle resource reading (serve the widget HTML)
+server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+  const { uri } = request.params;
+  if (uri === WIDGET_RESOURCE_URI) {
+    // Read widget HTML from public/ directory
+    const { readFileSync } = await import('fs');
+    const { join, dirname } = await import('path');
+    const { fileURLToPath } = await import('url');
+    const thisDir = dirname(fileURLToPath(import.meta.url));
+    const widgetPath = join(thisDir, '..', 'public', 'taxpilot-widget.html');
+    const html = readFileSync(widgetPath, 'utf-8');
+    return {
+      contents: [{
+        uri: WIDGET_RESOURCE_URI,
+        mimeType: 'text/html;profile=mcp-app',
+        text: html,
+      }],
+    };
+  }
+  throw new Error(`Unknown resource: ${uri}`);
 });
 
 // Handle tool calls

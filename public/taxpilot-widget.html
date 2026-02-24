@@ -1,0 +1,1150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TaxPilot - H&amp;R Block</title>
+<style>
+/* ═══════════════════════════════════════════════════════════════════
+   MCP Apps Widget — H&R Block TaxPilot
+   Self-contained HTML rendered inside a ChatGPT iframe.
+   Receives structuredContent via the MCP Apps postMessage bridge.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Reset & Host Theme Integration ─────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  /* HRB brand tokens (fallbacks — overridden by MCP host CSS vars) */
+  --hrb-green: #00A13A;
+  --hrb-green-dark: #008830;
+  --hrb-green-light: #E6F5EC;
+  --hrb-beige: #F5F0E8;
+  --hrb-beige-dark: #EDE5D8;
+  --hrb-text: #1a1a1a;
+  --hrb-text-light: #555;
+  --hrb-text-muted: #888;
+  --hrb-border: #e0ddd5;
+  --hrb-white: #ffffff;
+  --hrb-danger: #D32F2F;
+  --hrb-warning: #F9A825;
+  --hrb-info: #1976D2;
+  --hrb-radius: 12px;
+  --hrb-radius-sm: 8px;
+  --hrb-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  --hrb-shadow-lg: 0 4px 16px rgba(0,0,0,0.12);
+  --hrb-transition: 0.2s ease;
+}
+
+body {
+  font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
+  font-size: var(--font-text-md-size, 14px);
+  line-height: var(--font-text-md-line-height, 1.5);
+  color: var(--color-text-primary, var(--hrb-text));
+  background: transparent;
+  padding: 0;
+  overflow-x: hidden;
+}
+
+/* ── Structural ─────────────────────────────────────────────────── */
+#widget-root {
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.tp-structured { display: flex; flex-direction: column; gap: 12px; }
+.tp-loading { text-align: center; padding: 32px; color: var(--hrb-text-muted); }
+.tp-error { color: var(--hrb-danger); padding: 16px; text-align: center; }
+
+/* ── Buttons ────────────────────────────────────────────────────── */
+.tp-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 10px 20px; border: none; border-radius: var(--hrb-radius-sm);
+  font-size: 14px; font-weight: 600; cursor: pointer;
+  transition: all var(--hrb-transition); line-height: 1.4;
+}
+.tp-btn:active { transform: scale(0.97); }
+.tp-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+.tp-btn--primary { background: var(--hrb-green); color: #fff; }
+.tp-btn--primary:hover:not(:disabled) { background: var(--hrb-green-dark); }
+.tp-btn--secondary { background: var(--hrb-beige); color: var(--hrb-text); border: 1px solid var(--hrb-border); }
+.tp-btn--secondary:hover:not(:disabled) { background: var(--hrb-beige-dark); }
+.tp-btn--danger { background: var(--hrb-danger); color: #fff; }
+.tp-btn--ghost { background: transparent; color: var(--hrb-green); }
+.tp-btn--ghost:hover { background: var(--hrb-green-light); }
+.tp-btn--sm { padding: 6px 12px; font-size: 12px; }
+.tp-btn--lg { padding: 14px 28px; font-size: 16px; }
+.tp-btn-icon { font-size: 1.1em; }
+
+/* ── Form Fields ────────────────────────────────────────────────── */
+.tp-field { display: flex; flex-direction: column; gap: 4px; }
+.tp-field-label { font-size: 13px; font-weight: 600; color: var(--hrb-text); }
+.tp-required { color: var(--hrb-danger); margin-left: 2px; }
+.tp-input {
+  padding: 10px 12px; border: 1.5px solid var(--hrb-border); border-radius: var(--hrb-radius-sm);
+  font-size: 14px; background: var(--hrb-white); color: var(--hrb-text);
+  transition: border-color var(--hrb-transition);
+}
+.tp-input:focus { outline: none; border-color: var(--hrb-green); box-shadow: 0 0 0 3px rgba(0,161,58,0.15); }
+.tp-field-help { font-size: 12px; color: var(--hrb-text-muted); }
+
+/* ── Form Group ─────────────────────────────────────────────────── */
+.tp-form-group {
+  background: var(--hrb-white); border: 1px solid var(--hrb-border);
+  border-radius: var(--hrb-radius); padding: 20px;
+}
+.tp-form-title { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+.tp-form-desc { font-size: 13px; color: var(--hrb-text-light); margin-bottom: 16px; }
+.tp-form-fields { display: flex; flex-direction: column; gap: 14px; margin-bottom: 16px; }
+.tp-form-submit { width: 100%; }
+
+/* ── Multi-Select ───────────────────────────────────────────────── */
+.tp-multisel {}
+.tp-multisel-title { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+.tp-multisel-sub { font-size: 13px; color: var(--hrb-text-light); margin-bottom: 12px; }
+.tp-multisel-options { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.tp-mopt {
+  padding: 14px 16px; border: 2px solid var(--hrb-border); border-radius: var(--hrb-radius-sm);
+  cursor: pointer; transition: all var(--hrb-transition); background: var(--hrb-white);
+  user-select: none;
+}
+.tp-mopt:hover { border-color: var(--hrb-green); background: var(--hrb-green-light); }
+.tp-mopt--selected { border-color: var(--hrb-green); background: var(--hrb-green-light); }
+.tp-mopt-header { display: flex; align-items: center; gap: 12px; }
+.tp-mopt-icon { font-size: 22px; flex-shrink: 0; }
+.tp-mopt-text { flex: 1; }
+.tp-mopt-label { font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+.tp-mopt-desc { font-size: 12px; color: var(--hrb-text-light); margin-top: 2px; }
+.tp-mopt-badge {
+  font-size: 10px; padding: 2px 6px; border-radius: 4px;
+  background: var(--hrb-green); color: #fff; font-weight: 600;
+}
+.tp-mopt-check {
+  width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--hrb-border);
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  color: transparent; transition: all var(--hrb-transition);
+}
+.tp-mopt--selected .tp-mopt-check { border-color: var(--hrb-green); background: var(--hrb-green); color: #fff; }
+
+/* ── Selection Card ─────────────────────────────────────────────── */
+.tp-sel {}
+.tp-sel-title { font-size: 15px; font-weight: 600; margin-bottom: 10px; }
+.tp-sel-options { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+.tp-sopt {
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 16px; border: 2px solid var(--hrb-border); border-radius: var(--hrb-radius-sm);
+  cursor: pointer; transition: all var(--hrb-transition); background: var(--hrb-white);
+}
+.tp-sopt:hover { border-color: var(--hrb-green); }
+.tp-sopt--selected { border-color: var(--hrb-green); background: var(--hrb-green-light); }
+.tp-sopt-icon { font-size: 24px; }
+.tp-sopt-label { font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 6px; }
+.tp-sopt-desc { font-size: 12px; color: var(--hrb-text-light); margin-top: 2px; }
+.tp-sopt-badge {
+  font-size: 10px; padding: 2px 6px; border-radius: 4px;
+  background: var(--hrb-green); color: #fff; font-weight: 600;
+}
+
+/* ── Badges ─────────────────────────────────────────────────────── */
+.tp-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: 600;
+}
+.tp-badge-icon { font-size: 1em; }
+.tp-badge--success { background: #E8F5E9; color: #2E7D32; }
+.tp-badge--warning { background: #FFF8E1; color: #F57F17; }
+.tp-badge--error { background: #FFEBEE; color: #C62828; }
+.tp-badge--info { background: #E3F2FD; color: #1565C0; }
+.tp-badge--neutral { background: #F5F5F5; color: #616161; }
+.tp-badge--brand { background: var(--hrb-green-light); color: var(--hrb-green-dark); }
+
+/* ── Step Progress ──────────────────────────────────────────────── */
+.tp-steps { display: flex; align-items: flex-start; gap: 0; margin: 8px 0; overflow-x: auto; }
+.tp-step { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 56px; }
+.tp-step-dot {
+  width: 28px; height: 28px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700; border: 2px solid var(--hrb-border);
+  color: var(--hrb-text-muted); background: var(--hrb-white);
+}
+.tp-step--done .tp-step-dot { background: var(--hrb-green); color: #fff; border-color: var(--hrb-green); }
+.tp-step--active .tp-step-dot { border-color: var(--hrb-green); color: var(--hrb-green); background: var(--hrb-green-light); }
+.tp-step-label { font-size: 10px; text-align: center; color: var(--hrb-text-muted); white-space: nowrap; }
+.tp-step--active .tp-step-label { color: var(--hrb-green); font-weight: 600; }
+.tp-step--done .tp-step-label { color: var(--hrb-text); }
+.tp-step-line {
+  flex: 1; height: 2px; background: var(--hrb-border);
+  margin-top: 14px; min-width: 16px; align-self: stretch;
+}
+.tp-step-line--done { background: var(--hrb-green); }
+
+/* ── Progress Bar ───────────────────────────────────────────────── */
+.tp-progress { margin: 4px 0; }
+.tp-progress-header { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px; }
+.tp-progress-label { color: var(--hrb-text-light); }
+.tp-progress-pct { font-weight: 700; color: var(--hrb-green); }
+.tp-progress-track { height: 8px; background: var(--hrb-beige); border-radius: 4px; overflow: hidden; }
+.tp-progress-fill { height: 100%; background: var(--hrb-green); border-radius: 4px; transition: width 0.4s ease; }
+
+/* ── Info Card ──────────────────────────────────────────────────── */
+.tp-card {
+  background: var(--hrb-white); border: 1px solid var(--hrb-border);
+  border-radius: var(--hrb-radius); padding: 16px; box-shadow: var(--hrb-shadow);
+}
+.tp-card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.tp-card-title { font-size: 16px; font-weight: 700; }
+.tp-card-fields { display: flex; flex-direction: column; gap: 8px; }
+.tp-cardfield { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.tp-cardfield-icon { font-size: 15px; width: 20px; text-align: center; flex-shrink: 0; }
+.tp-cardfield-label { color: var(--hrb-text-light); min-width: 90px; }
+.tp-cardfield-value { font-weight: 600; color: var(--hrb-text); flex: 1; }
+.tp-card-highlight {
+  margin-top: 12px; padding: 10px 14px; background: #FFF8E1;
+  border-left: 3px solid var(--hrb-warning); border-radius: 4px;
+  font-size: 13px; color: #5D4037;
+}
+
+/* ── Appointment Summary ────────────────────────────────────────── */
+.tp-appt-summary {
+  background: var(--hrb-white); border: 2px solid var(--hrb-green);
+  border-radius: var(--hrb-radius); padding: 20px; box-shadow: var(--hrb-shadow-lg);
+}
+.tp-appt-confid {
+  text-align: center; font-size: 13px; color: var(--hrb-text-light);
+  padding-bottom: 12px; border-bottom: 1px solid var(--hrb-border); margin-bottom: 16px;
+}
+.tp-appt-sections { display: flex; flex-direction: column; gap: 16px; }
+.tp-appt-section {}
+.tp-appt-section-title { font-size: 14px; font-weight: 700; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+.tp-appt-pro-header { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+.tp-appt-pro-name { font-size: 15px; font-weight: 700; }
+.tp-appt-pro-title { font-size: 12px; color: var(--hrb-text-light); }
+.tp-appt-pro-rating { font-size: 12px; color: var(--hrb-warning); }
+.tp-appt-pro-specs { display: flex; flex-wrap: wrap; gap: 4px; }
+.tp-appt-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--hrb-border); }
+
+/* ── Tax Pro Card ───────────────────────────────────────────────── */
+.tp-pro-card {
+  background: var(--hrb-white); border: 1px solid var(--hrb-border);
+  border-radius: var(--hrb-radius); padding: 16px; box-shadow: var(--hrb-shadow);
+}
+.tp-pro-card--recommended { border-color: var(--hrb-green); border-width: 2px; }
+.tp-pro-recommended {
+  font-size: 12px; font-weight: 700; color: var(--hrb-green);
+  margin-bottom: 8px; display: flex; align-items: center; gap: 4px;
+}
+.tp-pro-header { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.tp-pro-avatar {
+  width: 40px; height: 40px; border-radius: 50%; background: var(--hrb-green);
+  color: #fff; display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 18px; flex-shrink: 0;
+}
+.tp-pro-name { font-size: 15px; font-weight: 700; }
+.tp-pro-title { font-size: 12px; color: var(--hrb-text-light); }
+.tp-pro-rating { font-size: 12px; }
+.tp-stars { color: var(--hrb-warning); }
+.tp-pro-specs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+.tp-pro-reason { font-size: 12px; color: var(--hrb-text-light); font-style: italic; margin-bottom: 8px; }
+.tp-pro-avail { font-size: 12px; color: var(--hrb-green); margin-bottom: 8px; }
+.tp-pro-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+
+/* ── Checklist ──────────────────────────────────────────────────── */
+.tp-checklist {
+  background: var(--hrb-white); border: 1px solid var(--hrb-border);
+  border-radius: var(--hrb-radius); overflow: hidden;
+}
+.tp-checklist-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 16px; background: var(--hrb-beige); font-weight: 700; font-size: 14px;
+}
+.tp-checklist-icon { font-size: 18px; }
+.tp-checklist-counter {
+  margin-left: auto; font-size: 12px; font-weight: 600;
+  background: var(--hrb-green); color: #fff; padding: 2px 8px; border-radius: 10px;
+}
+.tp-checklist-items { padding: 4px 0; }
+.tp-chk-item {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 16px; border-bottom: 1px solid #f0ede5;
+}
+.tp-chk-item:last-child { border-bottom: none; }
+.tp-chk-status {
+  width: 22px; height: 22px; border-radius: 50%; display: flex;
+  align-items: center; justify-content: center; font-size: 12px;
+  font-weight: 700; flex-shrink: 0; margin-top: 1px;
+}
+.tp-chk--done .tp-chk-status { background: var(--hrb-green); color: #fff; }
+.tp-chk--pending .tp-chk-status { border: 2px solid var(--hrb-warning); color: var(--hrb-warning); }
+.tp-chk--required .tp-chk-status { border: 2px solid var(--hrb-danger); color: var(--hrb-danger); }
+.tp-chk-body { flex: 1; min-width: 0; }
+.tp-chk-text { font-size: 13px; font-weight: 600; }
+.tp-chk-desc { font-size: 11px; color: var(--hrb-text-muted); margin-top: 2px; }
+.tp-chk-actions { flex-shrink: 0; }
+
+/* ── Banner ─────────────────────────────────────────────────────── */
+.tp-banner {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 16px; border-radius: var(--hrb-radius-sm); font-size: 14px; font-weight: 600;
+}
+.tp-banner--success { background: #E8F5E9; color: #2E7D32; }
+.tp-banner--info    { background: #E3F2FD; color: #1565C0; }
+.tp-banner--warning { background: #FFF8E1; color: #F57F17; }
+.tp-banner--error   { background: #FFEBEE; color: #C62828; }
+.tp-banner-icon { font-size: 18px; }
+.tp-banner-text { flex: 1; }
+.tp-banner-dismiss {
+  background: none; border: none; font-size: 18px; cursor: pointer;
+  color: inherit; opacity: 0.6; padding: 0 4px;
+}
+.tp-banner-dismiss:hover { opacity: 1; }
+
+/* ── Divider ────────────────────────────────────────────────────── */
+.tp-divider {
+  display: flex; align-items: center; gap: 12px;
+  margin: 8px 0; color: var(--hrb-text-muted); font-size: 12px;
+}
+.tp-divider::before, .tp-divider::after { content: ''; flex: 1; height: 1px; background: var(--hrb-border); }
+.tp-divider:empty::after { display: none; }
+.tp-divider:empty { height: 1px; background: var(--hrb-border); }
+
+/* ── Text Block ─────────────────────────────────────────────────── */
+.tp-text { margin: 2px 0; }
+.tp-text--heading { font-size: 18px; font-weight: 700; color: var(--hrb-text); }
+.tp-text--subheading { font-size: 15px; font-weight: 600; color: var(--hrb-text); }
+.tp-text--body { font-size: 14px; color: var(--hrb-text-light); line-height: 1.5; }
+.tp-text--caption { font-size: 12px; color: var(--hrb-text-muted); }
+
+/* ── Carousel ───────────────────────────────────────────────────── */
+.tp-carousel { position: relative; }
+.tp-carousel-track { display: flex; gap: 12px; overflow-x: auto; scroll-snap-type: x mandatory; padding: 4px; -ms-overflow-style: none; scrollbar-width: none; }
+.tp-carousel-track::-webkit-scrollbar { display: none; }
+.tp-carousel-item { min-width: 280px; flex-shrink: 0; scroll-snap-align: start; }
+.tp-carousel-nav {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  width: 32px; height: 32px; border-radius: 50%;
+  background: var(--hrb-white); border: 1px solid var(--hrb-border);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; font-size: 16px; box-shadow: var(--hrb-shadow);
+  z-index: 2;
+}
+.tp-carousel-prev { left: -8px; }
+.tp-carousel-next { right: -8px; }
+
+/* ── Confetti animation ─────────────────────────────────────────── */
+@keyframes confetti-pop {
+  0% { transform: scale(0.95); opacity: 0; }
+  50% { transform: scale(1.02); }
+  100% { transform: scale(1); opacity: 1; }
+}
+.tp-banner[data-confetti="true"] { animation: confetti-pop 0.5s ease-out; }
+</style>
+</head>
+<body>
+<div id="widget-root">
+  <div class="tp-loading">Loading TaxPilot...</div>
+</div>
+
+<script>
+/**
+ * MCP Apps Widget Bridge + Renderer
+ *
+ * This widget communicates with ChatGPT via the MCP Apps postMessage protocol.
+ * Flow:
+ *   1. Widget loads → sends ui/initialize to host
+ *   2. Host responds with capabilities + context
+ *   3. On tool calls: host sends ui/notifications/tool-input + ui/notifications/tool-result
+ *   4. Widget renders structuredContent from tool results
+ *   5. Widget can call tools back via tools/call request
+ */
+
+// ═══════════════════════════════════════════════════════════════════
+// MCP APPS BRIDGE
+// ═══════════════════════════════════════════════════════════════════
+
+class McpAppBridge {
+  constructor() {
+    this._requestId = 0;
+    this._pendingRequests = new Map();
+    this._handlers = new Map();
+    this._notificationHandlers = new Map();
+    this._initialized = false;
+    this._hostCapabilities = null;
+
+    // Listen for messages from the host (ChatGPT)
+    window.addEventListener('message', (event) => this._onMessage(event));
+  }
+
+  /** Start the bridge handshake */
+  async initialize() {
+    try {
+      const result = await this._sendRequest('ui/initialize', {
+        protocolVersion: '2026-01-26',
+        capabilities: {
+          tools: true,
+          notifications: true,
+        },
+      });
+
+      this._hostCapabilities = result;
+      this._initialized = true;
+
+      // Send initialized notification
+      this._sendNotification('ui/notifications/initialized', {});
+
+      return result;
+    } catch (err) {
+      console.warn('[MCP Bridge] Initialize failed — running in standalone mode:', err);
+      this._initialized = false;
+      return null;
+    }
+  }
+
+  /** Register a handler for incoming notifications */
+  onNotification(method, handler) {
+    if (!this._notificationHandlers.has(method)) {
+      this._notificationHandlers.set(method, []);
+    }
+    this._notificationHandlers.get(method).push(handler);
+  }
+
+  /** Call a tool on the MCP server via the host */
+  async callTool(name, args = {}) {
+    return this._sendRequest('tools/call', { name, arguments: args });
+  }
+
+  /** Send a size-changed notification */
+  sendSizeChanged(width, height) {
+    this._sendNotification('ui/notifications/size-changed', { width, height });
+  }
+
+  // ─── Internal ──────────────────────────────────────────────────
+
+  _sendRequest(method, params) {
+    return new Promise((resolve, reject) => {
+      const id = ++this._requestId;
+      this._pendingRequests.set(id, { resolve, reject });
+
+      const message = { jsonrpc: '2.0', id, method, params };
+      window.parent.postMessage(message, '*');
+
+      // Timeout after 30s
+      setTimeout(() => {
+        if (this._pendingRequests.has(id)) {
+          this._pendingRequests.delete(id);
+          reject(new Error(`Request ${method} timed out`));
+        }
+      }, 30000);
+    });
+  }
+
+  _sendNotification(method, params) {
+    const message = { jsonrpc: '2.0', method, params };
+    window.parent.postMessage(message, '*');
+  }
+
+  _onMessage(event) {
+    const data = event.data;
+    if (!data || typeof data !== 'object' || data.jsonrpc !== '2.0') return;
+
+    // Response to a request we sent
+    if (data.id !== undefined && data.id !== null) {
+      const pending = this._pendingRequests.get(data.id);
+      if (pending) {
+        this._pendingRequests.delete(data.id);
+        if (data.error) {
+          pending.reject(new Error(data.error.message || 'Unknown error'));
+        } else {
+          pending.resolve(data.result);
+        }
+      }
+      return;
+    }
+
+    // Notification from the host
+    if (data.method) {
+      const handlers = this._notificationHandlers.get(data.method) || [];
+      handlers.forEach(h => {
+        try { h(data.params || {}); } catch (e) { console.error('[MCP Bridge] Handler error:', e); }
+      });
+    }
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
+// SESSION STATE
+// ═══════════════════════════════════════════════════════════════════
+
+class SessionStateManager {
+  constructor() {
+    this._state = {
+      screen: 'home', sessionId: null, clientId: null,
+      intakeProgress: 0, currentIntakeStep: null,
+      taxProId: null, appointmentId: null,
+      formData: {}, selections: {},
+    };
+  }
+
+  get state() { return { ...this._state }; }
+
+  update(patch) {
+    if (!patch || typeof patch !== 'object') return;
+    this._state = { ...this._state, ...patch };
+  }
+
+  setFormValue(groupId, fieldId, value) {
+    if (!this._state.formData[groupId]) this._state.formData[groupId] = {};
+    this._state.formData[groupId][fieldId] = value;
+  }
+
+  getFormValues(groupId) { return this._state.formData[groupId] || {}; }
+
+  toggleSelection(groupId, itemId) {
+    if (!this._state.selections[groupId]) this._state.selections[groupId] = new Set();
+    const set = this._state.selections[groupId];
+    if (set.has(itemId)) set.delete(itemId); else set.add(itemId);
+    return [...set];
+  }
+
+  setSelection(groupId, itemId) {
+    this._state.selections[groupId] = new Set([itemId]);
+    return [itemId];
+  }
+
+  getSelections(groupId) {
+    return this._state.selections[groupId] ? [...this._state.selections[groupId]] : [];
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
+// WIDGET RENDERER
+// ═══════════════════════════════════════════════════════════════════
+
+class WidgetRenderer {
+  constructor(bridge, state) {
+    this.bridge = bridge;
+    this.state = state;
+    this.root = document.getElementById('widget-root');
+    this._bindings = [];
+    this._uidCounter = 0;
+  }
+
+  /** Render a StructuredUIResponse (from structuredContent or parsed tool result) */
+  renderResponse(response) {
+    if (!response) return;
+
+    // Apply state updates
+    if (response.stateUpdates) {
+      this.state.update(response.stateUpdates);
+    }
+
+    // Attempt to find components array
+    let components = response.components;
+    if (!components && response.screen) {
+      // Some responses may have screen-level data rather than components
+      this.root.innerHTML = `<div class="tp-structured"><div class="tp-text tp-text--body">Screen: ${esc(response.screen)}</div></div>`;
+      return;
+    }
+    if (!components || !Array.isArray(components)) {
+      // Try to render raw data as an info card
+      this._renderRawData(response);
+      return;
+    }
+
+    this._bindings = [];
+    const parts = components.map(c => this._renderComponent(c));
+    this.root.innerHTML = `<div class="tp-structured" data-screen="${response.screen || ''}">${parts.join('')}</div>`;
+
+    // Attach event handlers
+    this._bindings.forEach(fn => fn(this.root));
+    this._bindings = [];
+
+    // Notify host of size change
+    this._reportSize();
+  }
+
+  /** Render the UIResponse format (text content from tool result) */
+  renderUIResponse(uiResp) {
+    if (!uiResp) return;
+
+    // Convert UIResponse to a simple display
+    const parts = [];
+
+    if (uiResp._ui) {
+      const ui = uiResp._ui;
+      if (ui.title) parts.push(`<div class="tp-text tp-text--heading">${esc(ui.title)}</div>`);
+      if (ui.subtitle) parts.push(`<div class="tp-text tp-text--subheading">${esc(ui.subtitle)}</div>`);
+      if (ui.badge) parts.push(`<span class="tp-badge tp-badge--brand">${esc(ui.badge)}</span>`);
+      if (ui.highlight) parts.push(`<div class="tp-card-highlight">${esc(ui.highlight)}</div>`);
+    }
+
+    // Data fields
+    if (uiResp.data || uiResp) {
+      const data = uiResp.data || uiResp;
+      const fields = [];
+      for (const [key, val] of Object.entries(data)) {
+        if (key.startsWith('_') || key === 'data') continue;
+        if (typeof val === 'string' || typeof val === 'number') {
+          fields.push(`<div class="tp-cardfield"><span class="tp-cardfield-label">${esc(key)}</span><span class="tp-cardfield-value">${esc(String(val))}</span></div>`);
+        }
+      }
+      if (fields.length) {
+        parts.push(`<div class="tp-card"><div class="tp-card-fields">${fields.join('')}</div></div>`);
+      }
+    }
+
+    if (parts.length === 0) {
+      parts.push(`<div class="tp-text tp-text--body">Response received</div>`);
+    }
+
+    this.root.innerHTML = `<div class="tp-structured">${parts.join('')}</div>`;
+    this._reportSize();
+  }
+
+  _renderRawData(data) {
+    const fields = [];
+    for (const [key, val] of Object.entries(data)) {
+      if (key.startsWith('_')) continue;
+      if (typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean') {
+        fields.push(`<div class="tp-cardfield"><span class="tp-cardfield-label">${esc(key)}</span><span class="tp-cardfield-value">${esc(String(val))}</span></div>`);
+      }
+    }
+    this.root.innerHTML = fields.length
+      ? `<div class="tp-structured"><div class="tp-card"><div class="tp-card-fields">${fields.join('')}</div></div></div>`
+      : `<div class="tp-structured"><div class="tp-text tp-text--body">Data received</div></div>`;
+    this._reportSize();
+  }
+
+  _reportSize() {
+    requestAnimationFrame(() => {
+      const rect = this.root.getBoundingClientRect();
+      this.bridge.sendSizeChanged(Math.ceil(rect.width), Math.ceil(rect.height));
+    });
+  }
+
+  // ─── Component dispatcher ──────────────────────────────────────
+  _renderComponent(c) {
+    if (!c || !c.component) return '';
+    switch (c.component) {
+      case 'Button':              return this._renderButton(c);
+      case 'FormField':           return this._renderFormField(c);
+      case 'FormGroup':           return this._renderFormGroup(c);
+      case 'MultiSelectCard':     return this._renderMultiSelect(c);
+      case 'SelectionCard':       return this._renderSelectionCard(c);
+      case 'StatusBadge':         return this._renderStatusBadge(c);
+      case 'StepProgress':        return this._renderStepProgress(c);
+      case 'ProgressBar':         return this._renderProgressBar(c);
+      case 'InfoCard':            return this._renderInfoCard(c);
+      case 'AppointmentSummaryCard': return this._renderAppointmentSummary(c);
+      case 'TaxProCard':          return this._renderTaxProCard(c);
+      case 'Checklist':           return this._renderChecklist(c);
+      case 'Banner':              return this._renderBanner(c);
+      case 'Divider':             return this._renderDivider(c);
+      case 'TextBlock':           return this._renderTextBlock(c);
+      case 'Carousel':            return this._renderCarousel(c);
+      default: return `<!-- unknown: ${c.component} -->`;
+    }
+  }
+
+  // ─── Button ────────────────────────────────────────────────────
+  _renderButton(c) {
+    const id = this._uid('btn');
+    const variantClass = {
+      danger: 'tp-btn--danger', secondary: 'tp-btn--secondary',
+      ghost: 'tp-btn--ghost', success: 'tp-btn--primary',
+    }[c.variant] || 'tp-btn--primary';
+    const sizeClass = c.size === 'sm' ? 'tp-btn--sm' : c.size === 'lg' ? 'tp-btn--lg' : '';
+    const disabled = c.disabled ? 'disabled' : '';
+    const icon = c.icon ? `<span class="tp-btn-icon">${c.icon}</span>` : '';
+
+    this._bindings.push(el => {
+      const btn = el.querySelector(`#${id}`);
+      if (btn) btn.addEventListener('click', () => this._handleAction(c.action));
+    });
+
+    return `<button id="${id}" class="tp-btn ${variantClass} ${sizeClass}" ${disabled}>${icon}<span>${esc(c.label)}</span></button>`;
+  }
+
+  // ─── Form Field ────────────────────────────────────────────────
+  _renderFormField(c, groupId) {
+    const id = this._uid('field');
+    const gid = groupId || '__global';
+    const required = c.required ? 'required' : '';
+    const requiredMark = c.required ? '<span class="tp-required">*</span>' : '';
+    let input = '';
+
+    switch (c.type) {
+      case 'select':
+        input = `<select id="${id}" class="tp-input tp-select" ${required}>
+          <option value="" disabled selected>${esc(c.placeholder || 'Select...')}</option>
+          ${(c.options || []).map(o => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('')}
+        </select>`;
+        break;
+      case 'textarea':
+        input = `<textarea id="${id}" class="tp-input tp-textarea" placeholder="${esc(c.placeholder || '')}" rows="3" ${required}></textarea>`;
+        break;
+      case 'date':
+        input = `<input type="date" id="${id}" class="tp-input" ${required}>`;
+        break;
+      case 'email':
+        input = `<input type="email" id="${id}" class="tp-input" placeholder="${esc(c.placeholder || '')}" ${required}>`;
+        break;
+      case 'phone':
+        input = `<input type="tel" id="${id}" class="tp-input" placeholder="${esc(c.placeholder || '')}" ${required}>`;
+        break;
+      case 'number':
+        input = `<input type="number" id="${id}" class="tp-input" placeholder="${esc(c.placeholder || '')}" ${required}>`;
+        break;
+      default:
+        input = `<input type="text" id="${id}" class="tp-input" placeholder="${esc(c.placeholder || '')}" ${required}>`;
+    }
+
+    const helpText = c.helperText ? `<div class="tp-field-help">${esc(c.helperText)}</div>` : '';
+
+    this._bindings.push(el => {
+      const inp = el.querySelector(`#${id}`);
+      if (inp) inp.addEventListener('change', () => this.state.setFormValue(gid, c.id, inp.value));
+    });
+
+    return `<div class="tp-field"><label class="tp-field-label" for="${id}">${esc(c.label)}${requiredMark}</label>${input}${helpText}</div>`;
+  }
+
+  // ─── Form Group ────────────────────────────────────────────────
+  _renderFormGroup(c) {
+    const gid = this._uid('fgroup');
+    const title = c.title ? `<div class="tp-form-title">${esc(c.title)}</div>` : '';
+    const subtitle = c.subtitle ? `<div class="tp-form-desc">${esc(c.subtitle)}</div>` : '';
+    const fields = (c.fields || []).map(f => this._renderFormField(f, gid)).join('');
+    const submitLabel = c.submitLabel || 'Submit';
+    const submitId = this._uid('fsubmit');
+
+    this._bindings.push(el => {
+      const btn = el.querySelector(`#${submitId}`);
+      if (btn) btn.addEventListener('click', () => {
+        const values = this.state.getFormValues(gid);
+        if (c.submitAction) {
+          const action = { ...c.submitAction };
+          if (action.type === 'tool_call') {
+            action.toolArgs = { ...(action.toolArgs || {}), ...values };
+          } else if (action.type === 'submit_form') {
+            action.formData = values;
+          }
+          this._handleAction(action);
+        }
+      });
+    });
+
+    return `<div class="tp-form-group" data-group="${gid}">${title}${subtitle}<div class="tp-form-fields">${fields}</div><button id="${submitId}" class="tp-btn tp-btn--primary tp-form-submit">${esc(submitLabel)}</button></div>`;
+  }
+
+  // ─── Multi-Select ──────────────────────────────────────────────
+  _renderMultiSelect(c) {
+    const gid = this._uid('msel');
+    const isMulti = c.multiSelect !== false;
+    const submitId = this._uid('msubmit');
+    const title = c.title ? `<div class="tp-multisel-title">${esc(c.title)}</div>` : '';
+    const subtitle = c.subtitle ? `<div class="tp-multisel-sub">${esc(c.subtitle)}</div>` : '';
+
+    const options = (c.options || []).map(opt => {
+      const oid = this._uid('mopt');
+      const icon = opt.icon ? `<span class="tp-mopt-icon">${opt.icon}</span>` : '';
+      const desc = opt.description ? `<div class="tp-mopt-desc">${esc(opt.description)}</div>` : '';
+
+      this._bindings.push(el => {
+        const optEl = el.querySelector(`#${oid}`);
+        if (optEl) optEl.addEventListener('click', () => {
+          if (isMulti) {
+            this.state.toggleSelection(gid, opt.id);
+            optEl.classList.toggle('tp-mopt--selected');
+          } else {
+            optEl.parentElement.querySelectorAll('.tp-mopt--selected').forEach(s => s.classList.remove('tp-mopt--selected'));
+            this.state.setSelection(gid, opt.id);
+            optEl.classList.add('tp-mopt--selected');
+          }
+        });
+      });
+
+      return `<div id="${oid}" class="tp-mopt" data-value="${esc(opt.id)}">
+        <div class="tp-mopt-header">${icon}<div class="tp-mopt-text"><div class="tp-mopt-label">${esc(opt.label)}</div>${desc}</div>
+        <div class="tp-mopt-check"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div></div>
+      </div>`;
+    }).join('');
+
+    this._bindings.push(el => {
+      const btn = el.querySelector(`#${submitId}`);
+      if (btn) btn.addEventListener('click', () => {
+        const selected = this.state.getSelections(gid);
+        if (c.minSelect && selected.length < c.minSelect) return;
+        if (c.submitAction) {
+          const action = { ...c.submitAction };
+          if (action.type === 'tool_call') {
+            action.toolArgs = { ...(action.toolArgs || {}), selections: selected };
+          }
+          this._handleAction(action);
+        }
+      });
+    });
+
+    return `<div class="tp-multisel" data-group="${gid}">${title}${subtitle}<div class="tp-multisel-options">${options}</div><button id="${submitId}" class="tp-btn tp-btn--primary">${esc(c.submitLabel || 'Continue')}</button></div>`;
+  }
+
+  // ─── Selection Card ────────────────────────────────────────────
+  _renderSelectionCard(c) {
+    const title = c.title ? `<div class="tp-sel-title">${esc(c.title)}</div>` : '';
+    const options = (c.options || []).map(opt => {
+      const oid = this._uid('sopt');
+      const icon = opt.icon ? `<span class="tp-sopt-icon">${opt.icon}</span>` : '';
+      const badge = opt.badge ? `<span class="tp-sopt-badge">${esc(opt.badge)}</span>` : '';
+      const desc = opt.description ? `<div class="tp-sopt-desc">${esc(opt.description)}</div>` : '';
+
+      this._bindings.push(el => {
+        const optEl = el.querySelector(`#${oid}`);
+        if (optEl) optEl.addEventListener('click', () => {
+          optEl.closest('.tp-sel-options').querySelectorAll('.tp-sopt--selected').forEach(s => s.classList.remove('tp-sopt--selected'));
+          optEl.classList.add('tp-sopt--selected');
+          if (c.action) {
+            const action = { ...c.action };
+            if (action.type === 'tool_call') {
+              action.toolArgs = { ...(action.toolArgs || {}), selection: opt.id };
+            } else if (action.type === 'send_message') {
+              action.message = opt.label;
+            }
+            this._handleAction(action);
+          }
+        });
+      });
+
+      return `<div id="${oid}" class="tp-sopt" data-value="${esc(opt.id)}">${icon}<div class="tp-sopt-text"><div class="tp-sopt-label">${esc(opt.label)}${badge}</div>${desc}</div></div>`;
+    }).join('');
+
+    return `<div class="tp-sel">${title}<div class="tp-sel-options">${options}</div></div>`;
+  }
+
+  // ─── Simple components ─────────────────────────────────────────
+  _renderStatusBadge(c) {
+    const icon = c.icon ? `<span class="tp-badge-icon">${c.icon}</span>` : '';
+    return `<span class="tp-badge tp-badge--${c.variant || 'info'}">${icon}${esc(c.text)}</span>`;
+  }
+
+  _renderStepProgress(c) {
+    const steps = (c.steps || []).map((s, i) => {
+      const cls = s.status === 'done' ? 'tp-step--done' : s.status === 'active' ? 'tp-step--active' : 'tp-step--upcoming';
+      const icon = s.status === 'done' ? (s.icon || '✓') : String(i + 1);
+      const line = i < (c.steps || []).length - 1
+        ? `<div class="tp-step-line ${s.status === 'done' ? 'tp-step-line--done' : ''}"></div>` : '';
+      return `<div class="tp-step ${cls}"><div class="tp-step-dot">${icon}</div><div class="tp-step-label">${esc(s.label)}</div></div>${line}`;
+    }).join('');
+    return `<div class="tp-steps">${steps}</div>`;
+  }
+
+  _renderProgressBar(c) {
+    const pct = c.total ? Math.round((c.current / c.total) * 100) : c.current;
+    return `<div class="tp-progress"><div class="tp-progress-header"><span class="tp-progress-label">${esc(c.label || '')}</span><span class="tp-progress-pct">${pct}%</span></div><div class="tp-progress-track"><div class="tp-progress-fill" style="width:${pct}%"></div></div></div>`;
+  }
+
+  // ─── Info Card ─────────────────────────────────────────────────
+  _renderInfoCard(c) {
+    const badge = c.badge ? `<span class="tp-badge tp-badge--${c.badge.variant || 'info'}">${esc(c.badge.text)}</span>` : '';
+    const highlight = c.highlight ? `<div class="tp-card-highlight">${esc(c.highlight)}</div>` : '';
+    const fields = (c.fields || []).map(f => {
+      const icon = f.icon ? `<span class="tp-cardfield-icon">${f.icon}</span>` : '';
+      return `<div class="tp-cardfield">${icon}<span class="tp-cardfield-label">${esc(f.label)}</span><span class="tp-cardfield-value">${esc(f.value)}</span></div>`;
+    }).join('');
+    const actions = (c.actions || []).map(a => this._renderComponent(a)).join('');
+    return `<div class="tp-card"><div class="tp-card-head"><div class="tp-card-title">${esc(c.title)}</div>${badge}</div><div class="tp-card-fields">${fields}</div>${highlight}${actions ? `<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">${actions}</div>` : ''}</div>`;
+  }
+
+  // ─── Appointment Summary ───────────────────────────────────────
+  _renderAppointmentSummary(c) {
+    const apt = c.appointment || {};
+    const pro = c.taxPro || {};
+    const client = c.client || {};
+    const confId = c.confirmationId ? `<div class="tp-appt-confid">Confirmation: <strong>${esc(c.confirmationId)}</strong></div>` : '';
+    const stars = '★'.repeat(Math.floor(pro.rating || 0)) + (pro.rating % 1 >= 0.5 ? '½' : '');
+    const specs = (pro.specializations || []).map(s => `<span class="tp-badge tp-badge--info">${esc(s)}</span>`).join(' ');
+    const actions = (c.actions || []).map(a => this._renderComponent(a)).join('');
+
+    return `<div class="tp-appt-summary">${confId}
+      <div class="tp-appt-sections">
+        <div class="tp-appt-section">
+          <div class="tp-appt-section-title">📅 Appointment Details</div>
+          ${apt.date ? `<div class="tp-cardfield"><span class="tp-cardfield-icon">📆</span><span class="tp-cardfield-label">Date</span><span class="tp-cardfield-value">${esc(apt.date)}</span></div>` : ''}
+          ${apt.time ? `<div class="tp-cardfield"><span class="tp-cardfield-icon">🕐</span><span class="tp-cardfield-label">Time</span><span class="tp-cardfield-value">${esc(apt.time)}</span></div>` : ''}
+          ${apt.duration ? `<div class="tp-cardfield"><span class="tp-cardfield-icon">⏱</span><span class="tp-cardfield-label">Duration</span><span class="tp-cardfield-value">${esc(apt.duration)}</span></div>` : ''}
+          ${apt.type ? `<div class="tp-cardfield"><span class="tp-cardfield-icon">${apt.type === 'Virtual' ? '💻' : '🏢'}</span><span class="tp-cardfield-label">Type</span><span class="tp-cardfield-value">${esc(apt.type)}</span></div>` : ''}
+          ${apt.location ? `<div class="tp-cardfield"><span class="tp-cardfield-icon">📍</span><span class="tp-cardfield-label">Location</span><span class="tp-cardfield-value">${esc(apt.location)}</span></div>` : ''}
+        </div>
+        <div class="tp-appt-section">
+          <div class="tp-appt-section-title">👨‍💼 Your Tax Professional</div>
+          <div class="tp-appt-pro-header"><div><div class="tp-appt-pro-name">${esc(pro.name || '')}</div><div class="tp-appt-pro-title">${esc(pro.title || '')}</div><div class="tp-appt-pro-rating"><span class="tp-stars">${stars}</span> ${pro.rating || ''}</div></div></div>
+          <div class="tp-appt-pro-specs">${specs}</div>
+        </div>
+        ${client.name ? `<div class="tp-appt-section"><div class="tp-appt-section-title">👤 Client</div><div class="tp-cardfield"><span class="tp-cardfield-label">Name</span><span class="tp-cardfield-value">${esc(client.name)}</span></div>${client.documentStatus ? `<div class="tp-cardfield"><span class="tp-cardfield-label">Documents</span><span class="tp-cardfield-value">${esc(client.documentStatus)}</span></div>` : ''}</div>` : ''}
+      </div>
+      ${actions ? `<div class="tp-appt-actions">${actions}</div>` : ''}
+    </div>`;
+  }
+
+  // ─── Tax Pro Card ──────────────────────────────────────────────
+  _renderTaxProCard(c) {
+    const pro = c.taxPro || {};
+    const recommended = c.recommended ? '<div class="tp-pro-recommended">⭐ Best Match</div>' : '';
+    const reason = c.matchReason ? `<div class="tp-pro-reason">${esc(c.matchReason)}</div>` : '';
+    const stars = '★'.repeat(Math.floor(pro.rating || 0)) + ((pro.rating || 0) % 1 >= 0.5 ? '½' : '');
+    const specs = (pro.specializations || []).map(s => `<span class="tp-badge tp-badge--info">${esc(s)}</span>`).join(' ');
+    const avail = pro.availability ? `<div class="tp-pro-avail">📅 ${esc(pro.availability)}</div>` : '';
+    const actions = (c.actions || []).map(a => this._renderComponent(a)).join('');
+
+    return `<div class="tp-pro-card ${c.recommended ? 'tp-pro-card--recommended' : ''}">
+      ${recommended}
+      <div class="tp-pro-header"><div class="tp-pro-avatar">${(pro.name || 'T').charAt(0)}</div><div class="tp-pro-info"><div class="tp-pro-name">${esc(pro.name || '')}</div><div class="tp-pro-title">${esc(pro.title || '')}</div><div class="tp-pro-rating"><span class="tp-stars">${stars}</span> ${pro.rating || ''}</div></div></div>
+      <div class="tp-pro-specs">${specs}</div>${reason}${avail}
+      ${actions ? `<div class="tp-pro-actions">${actions}</div>` : ''}
+    </div>`;
+  }
+
+  // ─── Checklist ─────────────────────────────────────────────────
+  _renderChecklist(c) {
+    const icon = c.icon ? `<span class="tp-checklist-icon">${c.icon}</span>` : '';
+    const counter = c.counter ? `<span class="tp-checklist-counter">${c.counter.done}/${c.counter.total}</span>` : '';
+    const items = (c.items || []).map(item => {
+      const statusCls = item.status === 'collected' ? 'tp-chk--done' : item.status === 'pending' ? 'tp-chk--pending' : 'tp-chk--required';
+      const statusIcon = item.status === 'collected' ? '✓' : item.status === 'pending' ? '○' : '!';
+      const desc = item.description ? `<div class="tp-chk-desc">${esc(item.description)}</div>` : '';
+      const actions = (item.actions || []).map(a => this._renderComponent(a)).join('');
+      return `<div class="tp-chk-item ${statusCls}"><div class="tp-chk-status">${statusIcon}</div><div class="tp-chk-body"><div class="tp-chk-text">${esc(item.text)}</div>${desc}</div>${actions ? `<div class="tp-chk-actions">${actions}</div>` : ''}</div>`;
+    }).join('');
+
+    return `<div class="tp-checklist"><div class="tp-checklist-header">${icon}<span class="tp-checklist-title">${esc(c.title)}</span>${counter}</div><div class="tp-checklist-items">${items}</div></div>`;
+  }
+
+  // ─── Banner ────────────────────────────────────────────────────
+  _renderBanner(c) {
+    const icon = c.icon ? `<span class="tp-banner-icon">${c.icon}</span>` : '';
+    const dismissId = c.dismissible ? this._uid('bdis') : null;
+    const dismiss = c.dismissible ? `<button id="${dismissId}" class="tp-banner-dismiss">&times;</button>` : '';
+    if (dismissId) {
+      this._bindings.push(el => {
+        const btn = el.querySelector(`#${dismissId}`);
+        if (btn) btn.addEventListener('click', () => { btn.closest('.tp-banner').style.display = 'none'; });
+      });
+    }
+    const confetti = c.confetti ? 'data-confetti="true"' : '';
+    return `<div class="tp-banner tp-banner--${c.variant || 'info'}" ${confetti}>${icon}<span class="tp-banner-text">${esc(c.text)}</span>${dismiss}</div>`;
+  }
+
+  _renderDivider(c) {
+    const label = c.label ? `<span class="tp-divider-label">${esc(c.label)}</span>` : '';
+    return `<div class="tp-divider">${label}</div>`;
+  }
+
+  _renderTextBlock(c) {
+    const cls = { heading: 'tp-text--heading', subheading: 'tp-text--subheading', caption: 'tp-text--caption' }[c.style] || 'tp-text--body';
+    return `<div class="tp-text ${cls}">${esc(c.text)}</div>`;
+  }
+
+  _renderCarousel(c) {
+    const cid = this._uid('carousel');
+    const items = (c.items || []).map(item => `<div class="tp-carousel-item">${this._renderComponent(item)}</div>`).join('');
+    this._bindings.push(el => {
+      const track = el.querySelector(`#${cid}`);
+      if (!track) return;
+      const prev = track.parentElement.querySelector('.tp-carousel-prev');
+      const next = track.parentElement.querySelector('.tp-carousel-next');
+      if (prev) prev.addEventListener('click', () => track.scrollBy({ left: -300, behavior: 'smooth' }));
+      if (next) next.addEventListener('click', () => track.scrollBy({ left: 300, behavior: 'smooth' }));
+    });
+    return `<div class="tp-carousel"><button class="tp-carousel-nav tp-carousel-prev">&lsaquo;</button><div class="tp-carousel-track" id="${cid}">${items}</div><button class="tp-carousel-nav tp-carousel-next">&rsaquo;</button></div>`;
+  }
+
+  // ─── Action handler ────────────────────────────────────────────
+  async _handleAction(action) {
+    if (!action) return;
+
+    switch (action.type) {
+      case 'tool_call': {
+        if (!action.toolName) return;
+        try {
+          // Show loading state
+          const loadingHtml = `<div class="tp-loading">Calling ${esc(action.toolName)}...</div>`;
+          this.root.insertAdjacentHTML('beforeend', loadingHtml);
+
+          const result = await this.bridge.callTool(action.toolName, action.toolArgs || {});
+
+          // The result's structuredContent will come through tool-result notification
+          // But if we get it directly, render it
+          if (result && result.structuredContent) {
+            this.renderResponse(result.structuredContent);
+          } else if (result && result.content) {
+            // Try to parse text content as JSON
+            const textContent = result.content.find(c => c.type === 'text');
+            if (textContent) {
+              try {
+                const parsed = JSON.parse(textContent.text);
+                this.renderUIResponse(parsed);
+              } catch {
+                this.root.innerHTML = `<div class="tp-text tp-text--body">${esc(textContent.text)}</div>`;
+              }
+            }
+          }
+        } catch (err) {
+          console.error('[Widget] Tool call failed:', err);
+          this.root.querySelector('.tp-loading')?.remove();
+        }
+        break;
+      }
+
+      case 'send_message': {
+        // Use the bridge to send a message prompt back to the model
+        try {
+          await this.bridge.callTool('__send_message', { message: action.message });
+        } catch {
+          // Fallback: just log
+          console.log('[Widget] Send message:', action.message);
+        }
+        break;
+      }
+
+      case 'navigate': {
+        if (action.screen) {
+          this.state.update({ screen: action.screen });
+        }
+        break;
+      }
+
+      case 'submit_form': {
+        // Form submission — merge formData and call associated tool
+        if (action.toolName) {
+          try {
+            const result = await this.bridge.callTool(action.toolName, {
+              ...(action.toolArgs || {}),
+              ...(action.formData || {}),
+            });
+            if (result && result.structuredContent) {
+              this.renderResponse(result.structuredContent);
+            }
+          } catch (err) {
+            console.error('[Widget] Form submit failed:', err);
+          }
+        }
+        break;
+      }
+    }
+  }
+
+  _uid(prefix) {
+    return `${prefix}_${++this._uidCounter}_${Math.random().toString(36).slice(2, 7)}`;
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
+// HTML ESCAPING
+// ═══════════════════════════════════════════════════════════════════
+
+function esc(text) {
+  if (typeof text !== 'string') return String(text ?? '');
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
+// INITIALIZATION
+// ═══════════════════════════════════════════════════════════════════
+
+(async function main() {
+  const bridge = new McpAppBridge();
+  const state = new SessionStateManager();
+  const renderer = new WidgetRenderer(bridge, state);
+
+  // Listen for tool input (arguments being streamed)
+  bridge.onNotification('ui/notifications/tool-input', (params) => {
+    console.log('[Widget] Tool input:', params);
+    // Tool arguments received — can preview what's coming
+  });
+
+  // Listen for tool input partial (streaming)
+  bridge.onNotification('ui/notifications/tool-input-partial', (params) => {
+    console.log('[Widget] Tool input partial:', params);
+  });
+
+  // Listen for tool result — this is the main rendering trigger
+  bridge.onNotification('ui/notifications/tool-result', (params) => {
+    console.log('[Widget] Tool result:', params);
+
+    // First check for structuredContent
+    if (params.structuredContent) {
+      renderer.renderResponse(params.structuredContent);
+      return;
+    }
+
+    // Fall back to parsing text content
+    if (params.content && Array.isArray(params.content)) {
+      const textContent = params.content.find(c => c.type === 'text');
+      if (textContent) {
+        try {
+          const parsed = JSON.parse(textContent.text);
+          // Check if it's a StructuredUIResponse
+          if (parsed.components && parsed.screen) {
+            renderer.renderResponse(parsed);
+          } else {
+            renderer.renderUIResponse(parsed);
+          }
+        } catch {
+          renderer.root.innerHTML = `<div class="tp-text tp-text--body">${esc(textContent.text)}</div>`;
+        }
+      }
+    }
+  });
+
+  // Listen for cancellation
+  bridge.onNotification('ui/notifications/tool-cancelled', (params) => {
+    renderer.root.innerHTML = `<div class="tp-banner tp-banner--warning"><span class="tp-banner-icon">⚠️</span><span class="tp-banner-text">${esc(params.reason || 'Operation cancelled')}</span></div>`;
+  });
+
+  // Listen for host context changes (theme, etc.)
+  bridge.onNotification('ui/notifications/host-context-changed', (params) => {
+    if (params.styles && params.styles.variables) {
+      const root = document.documentElement;
+      for (const [key, value] of Object.entries(params.styles.variables)) {
+        if (value) root.style.setProperty(key, value);
+      }
+    }
+  });
+
+  // Initialize the bridge
+  const hostResult = await bridge.initialize();
+
+  if (hostResult) {
+    // Successfully connected to ChatGPT host
+    renderer.root.innerHTML = '<div class="tp-loading">Ready — waiting for tool results...</div>';
+
+    // Apply host styles if provided
+    if (hostResult.hostContext && hostResult.hostContext.styles) {
+      const styles = hostResult.hostContext.styles;
+      if (styles.variables) {
+        const root = document.documentElement;
+        for (const [key, value] of Object.entries(styles.variables)) {
+          if (value) root.style.setProperty(key, value);
+        }
+      }
+    }
+  } else {
+    // Standalone mode — show a demo UI
+    renderer.root.innerHTML = `<div class="tp-structured">
+      <div class="tp-banner tp-banner--info"><span class="tp-banner-icon">ℹ️</span><span class="tp-banner-text">Running in standalone mode (not connected to ChatGPT)</span></div>
+      <div class="tp-text tp-text--heading">TaxPilot Widget</div>
+      <div class="tp-text tp-text--body">This widget renders inside ChatGPT when connected via the MCP Apps SDK. Open this page within a ChatGPT conversation to see interactive UI components.</div>
+    </div>`;
+  }
+})();
+</script>
+</body>
+</html>

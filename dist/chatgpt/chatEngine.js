@@ -190,7 +190,7 @@ const tools = [
                     clientId: { type: 'string' },
                     taxProId: { type: 'string' },
                     scheduledAt: { type: 'string', description: 'ISO datetime string' },
-                    type: { type: 'string', enum: ['virtual', 'in-person'] },
+                    type: { type: 'string', enum: ['virtual', 'in_person'] },
                 },
                 required: ['clientId', 'taxProId', 'scheduledAt'],
             },
