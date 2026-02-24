@@ -3,12 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>TaxPilot - H&amp;R Block</title>
+<title>TaxPilot — H&amp;R Block</title>
 <style>
 /* ═══════════════════════════════════════════════════════════════════
-   MCP Apps Widget — H&R Block TaxPilot
-   Self-contained HTML rendered inside a ChatGPT iframe.
-   Receives structuredContent via the MCP Apps postMessage bridge.
+   TaxPilot MCP Apps Widget — H&R Block
+   Works inside ChatGPT (Apps SDK / Skybridge) and standalone.
+   Data flow: window.openai.toolOutput → render
+              openai:set_globals event  → re-render
+              ui/notifications/tool-result (fallback) → render
    ═══════════════════════════════════════════════════════════════════ */
 
 /* ── Reset & Host Theme Integration ─────────────────────────────── */
@@ -997,11 +999,15 @@ class WidgetRenderer {
       }
 
       case 'send_message': {
-        // Use the bridge to send a message prompt back to the model
+        // 1. ChatGPT Apps SDK (preferred)
+        if (window.openai && typeof window.openai.sendFollowUpMessage === 'function') {
+          window.openai.sendFollowUpMessage({ prompt: action.message });
+          break;
+        }
+        // 2. MCP Apps bridge
         try {
           await this.bridge.callTool('__send_message', { message: action.message });
         } catch {
-          // Fallback: just log
           console.log('[Widget] Send message:', action.message);
         }
         break;
@@ -1056,7 +1062,15 @@ function esc(text) {
 
 
 // ═══════════════════════════════════════════════════════════════════
-// INITIALIZATION
+// INITIALIZATION — ChatGPT Apps SDK / Skybridge + MCP Bridge fallback
+//
+// Data priority:
+//   1. window.openai.toolOutput           — ChatGPT Skybridge (primary)
+//   2. openai:set_globals event            — ChatGPT re-hydration
+//   3. ui/notifications/tool-result        — MCP postMessage bridge
+//   4. window.__TAXPILOT_DATA__            — Server-side injected data
+//   5. /api/widget-data REST poll          — Local dev fallback
+//   6. Standalone welcome screen           — No host detected
 // ═══════════════════════════════════════════════════════════════════
 
 (async function main() {
@@ -1064,139 +1078,159 @@ function esc(text) {
   const state = new SessionStateManager();
   const renderer = new WidgetRenderer(bridge, state);
 
-  // Listen for tool input (arguments being streamed)
-  bridge.onNotification('ui/notifications/tool-input', (params) => {
-    console.log('[Widget] Tool input:', params);
-    // Tool arguments received — can preview what's coming
+  // ── Patch bridge.callTool to prefer window.openai.callTool ────────
+  const origCallTool = bridge.callTool.bind(bridge);
+  bridge.callTool = async function(name, args) {
+    // 1. ChatGPT Apps SDK (preferred — keeps tool call inside ChatGPT context)
+    if (window.openai && typeof window.openai.callTool === 'function') {
+      try {
+        const result = await window.openai.callTool(name, args);
+        // result may be { structuredContent, content } or the payload directly
+        return result;
+      } catch (e) {
+        console.warn('[Widget] window.openai.callTool failed, falling back to bridge:', e);
+      }
+    }
+    // 2. MCP Apps postMessage bridge
+    return origCallTool(name, args);
+  };
+
+  // ── Helper: render from any structuredContent / UIResponse payload ─
+  function renderPayload(payload) {
+    if (!payload) return;
+    // StructuredUIResponse: { components[], screen }
+    if (payload.components && Array.isArray(payload.components)) {
+      renderer.renderResponse(payload);
+    } else if (payload._ui || payload.data || payload.type || payload.title || payload.cards) {
+      renderer.renderUIResponse(payload);
+    } else {
+      renderer._renderRawData(payload);
+    }
+  }
+
+  // ── Step 1: window.openai.toolOutput (sync, set by ChatGPT on load) ─
+  if (window.openai && window.openai.toolOutput) {
+    renderPayload(window.openai.toolOutput);
+  } else if (window.openai) {
+    // Host present but no output yet — show ready state
+    renderer.root.innerHTML = `<div class="tp-structured">
+      <div class="tp-text tp-text--heading" style="text-align:center;font-size:15px">🟢 TaxPilot Ready</div>
+      <div class="tp-text tp-text--body" style="text-align:center;color:var(--hrb-text-muted)">Ask the assistant to start your tax intake &mdash; results will appear here.</div>
+    </div>`;
+  }
+
+  // ── Step 2: openai:set_globals event (ChatGPT fires this on re-renders) ─
+  window.addEventListener('openai:set_globals', (event) => {
+    // toolOutput may be in event.detail.globals or in window.openai directly
+    const output = (event.detail && event.detail.globals && event.detail.globals.toolOutput)
+      || (window.openai && window.openai.toolOutput);
+    if (output) {
+      renderPayload(output);
+    }
+  }, { passive: true });
+
+  // ── Step 3: MCP Apps bridge notifications ─────────────────────────
+
+  bridge.onNotification('ui/notifications/tool-input', (_params) => {
+    // Tool call in flight — optionally show a subtle loading indicator
   });
 
-  // Listen for tool input partial (streaming)
-  bridge.onNotification('ui/notifications/tool-input-partial', (params) => {
-    console.log('[Widget] Tool input partial:', params);
-  });
-
-  // Listen for tool result — this is the main rendering trigger
   bridge.onNotification('ui/notifications/tool-result', (params) => {
-    console.log('[Widget] Tool result:', params);
-
-    // First check for structuredContent
     if (params.structuredContent) {
-      renderer.renderResponse(params.structuredContent);
+      renderPayload(params.structuredContent);
       return;
     }
-
-    // Fall back to parsing text content
     if (params.content && Array.isArray(params.content)) {
-      const textContent = params.content.find(c => c.type === 'text');
-      if (textContent) {
-        try {
-          const parsed = JSON.parse(textContent.text);
-          // Check if it's a StructuredUIResponse
-          if (parsed.components && parsed.screen) {
-            renderer.renderResponse(parsed);
-          } else {
-            renderer.renderUIResponse(parsed);
-          }
-        } catch {
-          renderer.root.innerHTML = `<div class="tp-text tp-text--body">${esc(textContent.text)}</div>`;
-        }
+      const tc = params.content.find(c => c.type === 'text');
+      if (tc) {
+        try { renderPayload(JSON.parse(tc.text)); }
+        catch { renderer.root.innerHTML = `<div class="tp-text tp-text--body" style="padding:16px">${esc(tc.text)}</div>`; }
       }
     }
   });
 
-  // Listen for cancellation
   bridge.onNotification('ui/notifications/tool-cancelled', (params) => {
     renderer.root.innerHTML = `<div class="tp-banner tp-banner--warning"><span class="tp-banner-icon">⚠️</span><span class="tp-banner-text">${esc(params.reason || 'Operation cancelled')}</span></div>`;
   });
 
-  // Listen for host context changes (theme, etc.)
   bridge.onNotification('ui/notifications/host-context-changed', (params) => {
     if (params.styles && params.styles.variables) {
-      const root = document.documentElement;
+      const docRoot = document.documentElement;
       for (const [key, value] of Object.entries(params.styles.variables)) {
-        if (value) root.style.setProperty(key, value);
+        if (value) docRoot.style.setProperty(key, value);
       }
     }
   });
 
-  // Initialize the bridge
+  // ── If window.openai is already present, skip bridge init ─────────
+  if (window.openai) return;
+
+  // ── Otherwise: attempt bridge handshake (MCP Apps / standalone) ───
   const hostResult = await bridge.initialize();
 
   if (hostResult) {
-    // Successfully connected to ChatGPT host
-    renderer.root.innerHTML = '<div class="tp-loading">Ready — waiting for tool results...</div>';
-
-    // Apply host styles if provided
-    if (hostResult.hostContext && hostResult.hostContext.styles) {
-      const styles = hostResult.hostContext.styles;
-      if (styles.variables) {
-        const root = document.documentElement;
-        for (const [key, value] of Object.entries(styles.variables)) {
-          if (value) root.style.setProperty(key, value);
-        }
+    // Bridge connected — apply host theme
+    if (hostResult.hostContext && hostResult.hostContext.styles && hostResult.hostContext.styles.variables) {
+      const docRoot = document.documentElement;
+      for (const [key, value] of Object.entries(hostResult.hostContext.styles.variables)) {
+        if (value) docRoot.style.setProperty(key, value);
       }
+    }
+    // Don't overwrite any data already rendered by window.openai
+    if (!renderer.root.querySelector('.tp-structured:not(:empty)')) {
+      renderer.root.innerHTML = `<div class="tp-structured">
+        <div class="tp-text tp-text--heading" style="text-align:center;font-size:15px">🟢 TaxPilot Ready</div>
+        <div class="tp-text tp-text--body" style="text-align:center;color:var(--hrb-text-muted)">Connected — ask the assistant to start your tax intake.</div>
+      </div>`;
     }
   } else {
-    // Standalone mode — bridge handshake failed.
-    // Try embedded data first, then poll the server REST API for tool results.
+    // ── Standalone / local dev mode ───────────────────────────────────
+
+    // Check for embedded static data
     const embeddedData = window.__TAXPILOT_DATA__ || null;
     if (embeddedData && (embeddedData.components || embeddedData.screen || embeddedData._ui || embeddedData.data)) {
-      if (embeddedData.components) {
-        renderer.renderResponse(embeddedData);
-      } else {
-        renderer.renderUIResponse(embeddedData);
-      }
-    } else {
-      // Show loading state while we poll for data
-      renderer.root.innerHTML = `<div class="tp-structured">
-        <div class="tp-text tp-text--heading" style="text-align:center">🟢 TaxPilot</div>
-        <div class="tp-text tp-text--body" style="text-align:center;color:var(--hrb-text-muted)">Connecting to server...</div>
-      </div>`;
+      renderPayload(embeddedData);
+      return;
+    }
 
-      // Poll the REST API for tool results
-      const serverUrl = window.__TAXPILOT_SERVER__ || '';
-      let lastVersion = 0;
-      let pollCount = 0;
-      const maxPolls = 600; // 10 minutes max
+    // Welcome screen while polling
+    renderer.root.innerHTML = `<div class="tp-structured" style="align-items:center;text-align:center;gap:14px;padding:20px 12px">
+      <div style="width:60px;height:60px;border-radius:16px;background:var(--hrb-green);color:#fff;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:900;box-shadow:0 4px 14px rgba(0,161,58,0.3)">H</div>
+      <div>
+        <div class="tp-text tp-text--heading">TaxPilot by H&amp;R Block</div>
+        <div class="tp-text tp-text--body" style="margin-top:4px;max-width:320px">Your AI-powered tax preparation assistant. Start by telling the assistant your tax situation.</div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center">
+        <span style="padding:5px 12px;border-radius:20px;font-size:12px;font-weight:600;background:var(--hrb-green-light);color:var(--hrb-green-dark)">📋 Guided Intake</span>
+        <span style="padding:5px 12px;border-radius:20px;font-size:12px;font-weight:600;background:var(--hrb-green-light);color:var(--hrb-green-dark)">📄 Document Checklist</span>
+        <span style="padding:5px 12px;border-radius:20px;font-size:12px;font-weight:600;background:var(--hrb-green-light);color:var(--hrb-green-dark)">👨‍💼 Tax Pro Matching</span>
+        <span style="padding:5px 12px;border-radius:20px;font-size:12px;font-weight:600;background:var(--hrb-green-light);color:var(--hrb-green-dark)">📅 Scheduling</span>
+      </div>
+      <div style="font-size:12px;color:var(--hrb-text-muted);background:var(--hrb-beige);padding:10px 16px;border-radius:8px;width:100%;line-height:1.6">
+        <strong>Try saying:</strong> "Start my tax intake" · "Show my document checklist" · "Find a tax professional"
+      </div>
+    </div>`;
 
-      async function pollForData() {
-        if (pollCount >= maxPolls) return;
-        pollCount++;
-        try {
-          const resp = await fetch(`${serverUrl}/api/widget-data`, { mode: 'cors' });
-          if (resp.ok) {
-            const json = await resp.json();
-            if (json.version > lastVersion && json.data) {
-              lastVersion = json.version;
-              const data = json.data;
-              if (data.components) {
-                renderer.renderResponse(data);
-              } else if (data.type || data.title || data.cards || data._ui) {
-                renderer.renderUIResponse(data);
-              } else {
-                renderer._renderRawData(data);
-              }
-            } else if (lastVersion === 0) {
-              // No data yet — update loading message
-              renderer.root.innerHTML = `<div class="tp-structured">
-                <div class="tp-text tp-text--heading" style="text-align:center">🟢 TaxPilot</div>
-                <div class="tp-text tp-text--body" style="text-align:center;color:var(--hrb-text-muted)">Ready — ask the assistant to run a tool and results will appear here.</div>
-              </div>`;
-            }
-          }
-        } catch (e) {
-          if (pollCount === 1) {
-            console.warn('[Widget] REST poll failed:', e);
-            renderer.root.innerHTML = `<div class="tp-structured">
-              <div class="tp-text tp-text--heading" style="text-align:center">🟢 TaxPilot</div>
-              <div class="tp-text tp-text--body" style="text-align:center;color:var(--hrb-text-muted)">Ready — ask the assistant to run a tool.</div>
-            </div>`;
+    // Poll REST API for live tool results (local dev)
+    const serverUrl = window.__TAXPILOT_SERVER__ || '';
+    let lastVersion = 0;
+    let pollCount = 0;
+
+    async function pollForData() {
+      if (pollCount++ >= 600) return; // max 10 min
+      try {
+        const resp = await fetch(`${serverUrl}/api/widget-data`, { mode: 'cors' });
+        if (resp.ok) {
+          const json = await resp.json();
+          if (json.version > lastVersion && json.data) {
+            lastVersion = json.version;
+            renderPayload(json.data);
           }
         }
-        setTimeout(pollForData, 1000);
-      }
-      pollForData();
+      } catch {}
+      setTimeout(pollForData, 1000);
     }
+    pollForData();
   }
 })();
 </script>
