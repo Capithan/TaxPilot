@@ -13,6 +13,7 @@ export declare const hrbTheme: {
             readonly primaryDark: "#008830";
             readonly primaryLight: "#E6F4EA";
             readonly primaryMuted: "#66C285";
+            readonly neon: "#00E043";
             readonly secondary: "#2D2A26";
             readonly accent: "#00A13A";
         };

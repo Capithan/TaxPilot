@@ -233,6 +233,65 @@ export interface CarouselComponent {
     component: 'Carousel';
     items: (TaxProCardComponent | InfoCardComponent)[];
 }
+export interface AccordionItem {
+    title: string;
+    content?: string;
+    icon?: string;
+    badge?: string;
+    expanded?: boolean;
+    /** Nested components rendered inside the panel */
+    components?: UIComponent[];
+}
+export interface AccordionComponent {
+    component: 'Accordion';
+    title?: string;
+    items: AccordionItem[];
+}
+export interface AlertComponent {
+    component: 'Alert';
+    title?: string;
+    text: string;
+    variant: 'success' | 'info' | 'warning' | 'error';
+    icon?: string;
+    dismissible?: boolean;
+    actions?: ButtonComponent[];
+}
+export interface TabItem {
+    label: string;
+    icon?: string;
+    content?: string;
+    components?: UIComponent[];
+}
+export interface TabGroupComponent {
+    component: 'TabGroup';
+    title?: string;
+    tabs: TabItem[];
+}
+export interface NotificationComponent {
+    component: 'Notification';
+    message: string;
+    variant: 'success' | 'info' | 'warning' | 'error';
+    icon?: string;
+    duration?: number;
+    /** Also render as inline content */
+    showInline?: boolean;
+}
+export interface TooltipComponent {
+    component: 'Tooltip';
+    text: string;
+    tooltip: string;
+    position?: 'top' | 'bottom' | 'left' | 'right';
+}
+export interface StatCardComponent {
+    component: 'StatCard';
+    value: string;
+    label: string;
+    icon?: string;
+    trend?: {
+        direction: 'up' | 'down' | 'neutral';
+        text?: string;
+    };
+}
 /**
  * Unified action payload — defines what happens when user interacts.
  */
@@ -253,7 +312,7 @@ export interface UIActionPayload {
 /**
  * Union of all renderable components.
  */
-export type UIComponent = ButtonComponent | FormFieldComponent | FormGroupComponent | MultiSelectCardComponent | SelectionCardComponent | StatusBadgeComponent | StepProgressComponent | ProgressBarComponent | InfoCardComponent | AppointmentSummaryCardComponent | TaxProCardComponent | ChecklistComponent | BannerComponent | DividerComponent | TextBlockComponent | CarouselComponent;
+export type UIComponent = ButtonComponent | FormFieldComponent | FormGroupComponent | MultiSelectCardComponent | SelectionCardComponent | StatusBadgeComponent | StepProgressComponent | ProgressBarComponent | InfoCardComponent | AppointmentSummaryCardComponent | TaxProCardComponent | ChecklistComponent | BannerComponent | DividerComponent | TextBlockComponent | CarouselComponent | AccordionComponent | AlertComponent | TabGroupComponent | NotificationComponent | TooltipComponent | StatCardComponent;
 /**
  * A structured UI response that the ChatGPT assistant returns.
  * The frontend renderer walks the `components` array and renders each one.

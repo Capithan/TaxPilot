@@ -94,6 +94,27 @@ export function carousel(items) {
     return { component: 'Carousel', items };
 }
 // ═══════════════════════════════════════════════════════════════════════════════
+// NEW COMPONENT BUILDERS (v2.1 — BDS-aligned additions)
+// ═══════════════════════════════════════════════════════════════════════════════
+export function accordion(items, opts) {
+    return { component: 'Accordion', items, ...opts };
+}
+export function alert(text, variant, opts) {
+    return { component: 'Alert', text, variant, ...opts };
+}
+export function tabGroup(tabs, opts) {
+    return { component: 'TabGroup', tabs, ...opts };
+}
+export function notification(message, variant, opts) {
+    return { component: 'Notification', message, variant, ...opts };
+}
+export function tooltip(text, tip, position) {
+    return { component: 'Tooltip', text, tooltip: tip, position };
+}
+export function statCard(value, label, opts) {
+    return { component: 'StatCard', value, label, ...opts };
+}
+// ═══════════════════════════════════════════════════════════════════════════════
 // ACTION HELPERS
 // ═══════════════════════════════════════════════════════════════════════════════
 export function toolAction(toolName, toolArgs = {}) {
@@ -209,6 +230,12 @@ export const uiComponents = {
     divider,
     textBlock,
     carousel,
+    accordion,
+    alert,
+    tabGroup,
+    notification,
+    tooltip,
+    statCard,
     toolAction,
     messageAction,
     navigateAction,

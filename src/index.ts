@@ -14,6 +14,7 @@ import {
 import {
   startIntakeSession,
   processIntakeResponse,
+  processStructuredIntakeResponse,
   getIntakeProgress,
   getIntakeSummary,
 } from './services/intake.js';
@@ -97,7 +98,7 @@ import type { UIResponse } from './ui/types.js';
 const WIDGET_RESOURCE_URI = 'ui://taxpilot/widget.html';
 
 /** Wrap a UIResponse into the MCP content block format with structuredContent for Apps SDK. */
-function toMcpContent(uiResp: UIResponse): { content: Array<{ type: 'text'; text: string }>; structuredContent: Record<string, unknown> } {
+function toMcpContent(uiResp: UIResponse | Record<string, unknown>): { content: Array<{ type: 'text'; text: string }>; structuredContent: Record<string, unknown> } {
   return {
     content: [{ type: 'text' as const, text: JSON.stringify(uiResp, null, 2) }],
     structuredContent: uiResp as unknown as Record<string, unknown>,
@@ -139,7 +140,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'process_intake_response',
-        description: 'Process a client response during the intake conversation. Send the client\'s answer to continue gathering information. Accepts ALL data directly including sensitive information like SSN, bank details, W-2 specifics, and prior year AGI. No external portals or redirects.',
+        description: 'Process a client response during the intake conversation. Supports two modes: (1) structured form/selection data from UI components, or (2) plain text answer for conversational intake.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -149,10 +150,27 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             answer: {
               type: 'string',
-              description: 'The client\'s response - can include any information: personal details, SSN, bank info, W-2 data, etc.',
+              description: 'Plain text response from the client (used when no structured form data is provided)',
+            },
+            step: {
+              type: 'string',
+              description: 'The intake step this submission applies to (e.g. personal_info, filing_status, dependents_choice, employment, income_types, deductions, special_situations, document_upload, review)',
+            },
+            formData: {
+              type: 'object',
+              description: 'Structured form field values from a FormGroup submission (key-value pairs of field ID to value)',
+            },
+            selection: {
+              type: 'string',
+              description: 'Single selection ID from a SelectionCard',
+            },
+            selections: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Array of selected option IDs from a MultiSelectCard',
             },
           },
-          required: ['sessionId', 'answer'],
+          required: ['sessionId'],
         },
       },
       {
@@ -584,21 +602,36 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'process_intake_response': {
-        const result = processIntakeResponse(
-          args?.sessionId as string,
-          args?.answer as string
-        );
-        
+        const sid = args?.sessionId as string;
+        const step = args?.step as string | undefined;
+        const formData = args?.formData as Record<string, string> | undefined;
+        const selection = args?.selection as string | undefined;
+        const selections = args?.selections as string[] | undefined;
+
+        let result;
+
+        // Prefer structured path when step + form/selection data provided
+        if (step && (formData || selection || selections)) {
+          result = processStructuredIntakeResponse(
+            sid, step, formData, selection, selections,
+          );
+        } else {
+          result = processIntakeResponse(
+            sid,
+            args?.answer as string,
+          );
+        }
+
         // Check if intake is complete and advance flow
         if (result.intakeCompleted && result.client) {
-          const flowState = getOrCreateFlowState(result.client.id, args?.sessionId as string);
+          const flowState = getOrCreateFlowState(result.client.id, sid);
           advanceFlow(result.client.id, { completed: true });
         }
-        
+
         // Get progress for the UI
-        const intakeProgress = getIntakeProgress(args?.sessionId as string);
-        
-        return toMcpContent(formatIntakeResponse(result, args?.sessionId as string, intakeProgress ? {
+        const intakeProgress = getIntakeProgress(sid);
+
+        return toMcpContent(formatIntakeResponse(result, sid, intakeProgress ? {
           completedSteps: intakeProgress.completedSteps,
           totalSteps: intakeProgress.totalSteps,
           percentComplete: intakeProgress.percentComplete,

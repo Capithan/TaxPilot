@@ -8,26 +8,32 @@
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
     :root {
-      --primary: #10a37f;
-      --primary-hover: #0d8c6d;
-      --accent: #7c3aed;
-      --bg: #f7f7f8;
+      /* BDS-aligned H&R Block Design Tokens */
+      --primary: #00A13A;
+      --primary-hover: #008830;
+      --primary-light: #E6F4EA;
+      --accent: #00A13A;
+      --bg: #F5F0E8;
       --surface: #ffffff;
-      --surface-alt: #f4f4f5;
-      --text: #1a1a1a;
-      --text-muted: #6e6e80;
-      --border: #e5e5e7;
-      --success: #16a34a;
-      --success-bg: #f0fdf4;
-      --warning: #d97706;
-      --warning-bg: #fffbeb;
-      --error: #dc2626;
-      --error-bg: #fef2f2;
-      --info: #2563eb;
-      --info-bg: #eff6ff;
+      --surface-alt: #FAF7F2;
+      --text: #2D2A26;
+      --text-muted: #8A847B;
+      --text-secondary: #5C5750;
+      --border: #D9D2C7;
+      --border-light: #E8E2D8;
+      --success: #2E7D32;
+      --success-bg: #E8F5E9;
+      --warning: #E65100;
+      --warning-bg: #FFF3E0;
+      --error: #C62828;
+      --error-bg: #FFEBEE;
+      --info: #1565C0;
+      --info-bg: #E3F2FD;
       --radius: 12px;
-      --shadow: 0 1px 3px rgba(0,0,0,0.08);
-      --shadow-lg: 0 4px 12px rgba(0,0,0,0.12);
+      --radius-sm: 8px;
+      --shadow: 0 1px 3px rgba(45,42,38,0.06), 0 1px 2px rgba(45,42,38,0.04);
+      --shadow-lg: 0 8px 24px rgba(45,42,38,0.10);
+      --shadow-focus: 0 0 0 3px rgba(0,161,58,0.15);
     }
 
     body {
@@ -60,9 +66,9 @@
     .sidebar-header .logo-icon {
       width: 36px; height: 36px;
       background: var(--primary);
-      border-radius: 10px;
+      border-radius: 8px;
       display: flex; align-items: center; justify-content: center;
-      color: white; font-size: 20px;
+      color: white; font-size: 18px; font-weight: 700;
     }
 
     .sidebar-header h1 { font-size: 1.15rem; font-weight: 700; }
@@ -158,7 +164,7 @@
     }
     .welcome-icon {
       width: 72px; height: 72px;
-      background: linear-gradient(135deg, var(--primary), #059669);
+      background: linear-gradient(135deg, #008830, #00A13A, #66C285);
       border-radius: 18px;
       display: flex; align-items: center; justify-content: center;
       margin: 0 auto 20px;
@@ -244,7 +250,7 @@
     }
     .ui-progress-fill {
       height: 100%;
-      background: linear-gradient(90deg, var(--primary), #059669);
+      background: linear-gradient(90deg, #00A13A, #66C285);
       border-radius: 4px;
       transition: width 0.5s ease;
     }
@@ -493,10 +499,10 @@
 <!-- ── Sidebar ──────────────────────────────────────── -->
 <aside class="sidebar">
   <div class="sidebar-header">
-    <div class="logo-icon">📋</div>
+    <div class="logo-icon">H</div>
     <div>
       <h1>TaxPilot</h1>
-      <span>Local Dev Console</span>
+      <span>H&amp;R Block Dev Console</span>
     </div>
   </div>
 
@@ -579,9 +585,9 @@
     <div class="feed-inner" id="feedInner">
       <!-- Welcome screen -->
       <div class="welcome" id="welcome">
-        <div class="welcome-icon">📋</div>
+        <div class="welcome-icon">H</div>
         <h2>Welcome to TaxPilot</h2>
-        <p>This is your local development console. Every tool returns structured UI components — cards, progress bars, action buttons — rendered in real time, no cloud required.</p>
+        <p>This is your H&amp;R Block development console. Every tool returns structured UI components — cards, progress bars, action buttons — rendered in real time.</p>
         <div class="welcome-actions">
           <button class="cta" onclick="callTool('start_intake')">▶️  Start Intake Session</button>
           <button onclick="callTool('get_tax_pro_recommendations', {clientId:'demo'})">👨‍💼  Browse Tax Pros</button>
@@ -882,7 +888,6 @@ function renderSection(sec) {
       h += `<span class="item-text">${escHtml(item.text)}</span>`;
       if (item.actions && item.actions.length) {
         for (const a of item.actions) {
-          const args = escHtml(JSON.stringify(a.toolArgs || {}));
           h += `<button class="item-action-btn" onclick='callTool(${JSON.stringify(a.toolName)}, ${JSON.stringify(a.toolArgs || {})})'>${a.icon || ''} ${escHtml(a.label)}</button>`;
         }
       }
@@ -895,7 +900,6 @@ function renderSection(sec) {
 
 function renderActionButton(act) {
   const style = act.style || 'secondary';
-  const argsJson = JSON.stringify(act.toolArgs || {});
   return `<button class="ui-action-btn ${style}" onclick='callTool(${JSON.stringify(act.toolName)}, ${JSON.stringify(act.toolArgs || {})})'>${act.icon || ''} ${escHtml(act.label)}</button>`;
 }
 

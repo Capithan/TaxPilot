@@ -4,7 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { startIntakeSession, processIntakeResponse, getIntakeProgress, getIntakeSummary, } from '../services/intake.js';
+import { startIntakeSession, processIntakeResponse, processStructuredIntakeResponse, getIntakeProgress, getIntakeSummary, } from '../services/intake.js';
 import { generateDocumentChecklist, getDocumentChecklist, markDocumentCollected, getPendingDocuments, } from '../services/checklist.js';
 import { createDocumentReminder, createBatchDocumentReminder, getClientReminders, sendReminder, } from '../services/reminders.js';
 import { findBestTaxPro, routeClientToTaxPro, createAppointment, getAppointmentEstimate, } from '../services/routing.js';
@@ -413,9 +413,20 @@ function handleToolCall(name, args) {
                 return toMcpContent(formatIntakeStart(result));
             }
             case 'process_intake_response': {
-                const result = processIntakeResponse(args.sessionId, args.answer);
-                const intakeProgress = getIntakeProgress(args.sessionId);
-                return toMcpContent(formatIntakeResponse(result, args.sessionId, intakeProgress ? {
+                const sid = args.sessionId;
+                const step = args.step;
+                const formData = args.formData;
+                const selection = args.selection;
+                const selections = args.selections;
+                let result;
+                if (step && (formData || selection || selections)) {
+                    result = processStructuredIntakeResponse(sid, step, formData, selection, selections);
+                }
+                else {
+                    result = processIntakeResponse(sid, args.answer);
+                }
+                const intakeProgress = getIntakeProgress(sid);
+                return toMcpContent(formatIntakeResponse(result, sid, intakeProgress ? {
                     completedSteps: intakeProgress.completedSteps,
                     totalSteps: intakeProgress.totalSteps,
                     percentComplete: intakeProgress.percentComplete,

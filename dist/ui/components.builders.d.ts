@@ -4,7 +4,7 @@
  * Fluent builder API for constructing StructuredUIResponse objects
  * with the new HRB component system. Used by backend formatters.
  */
-import type { SessionScreen, SessionState, ButtonComponent, ButtonVariant, ButtonSize, FormFieldComponent, FormFieldType, FormGroupComponent, MultiSelectCardComponent, SelectionCardComponent, ChoiceOption, StatusBadgeComponent, BadgeVariant, StepProgressComponent, ProgressBarComponent, InfoCardComponent, AppointmentSummaryCardComponent, TaxProCardComponent, ChecklistComponent, BannerComponent, DividerComponent, TextBlockComponent, CarouselComponent, UIActionPayload, UIComponent, StructuredUIResponse } from './components.types.js';
+import type { SessionScreen, SessionState, ButtonComponent, ButtonVariant, ButtonSize, FormFieldComponent, FormFieldType, FormGroupComponent, MultiSelectCardComponent, SelectionCardComponent, ChoiceOption, StatusBadgeComponent, BadgeVariant, StepProgressComponent, ProgressBarComponent, InfoCardComponent, AppointmentSummaryCardComponent, TaxProCardComponent, ChecklistComponent, BannerComponent, DividerComponent, TextBlockComponent, CarouselComponent, AccordionComponent, AccordionItem, AlertComponent, TabGroupComponent, TabItem, NotificationComponent, TooltipComponent, StatCardComponent, UIActionPayload, UIComponent, StructuredUIResponse } from './components.types.js';
 export declare function primaryButton(label: string, action: UIActionPayload): ButtonComponent;
 export declare function secondaryButton(label: string, action: UIActionPayload): ButtonComponent;
 export declare function dangerButton(label: string, action: UIActionPayload): ButtonComponent;
@@ -54,6 +54,28 @@ export declare function banner(text: string, variant: BannerComponent['variant']
 export declare function divider(label?: string): DividerComponent;
 export declare function textBlock(text: string, style?: TextBlockComponent['style']): TextBlockComponent;
 export declare function carousel(items: CarouselComponent['items']): CarouselComponent;
+export declare function accordion(items: AccordionItem[], opts?: {
+    title?: string;
+}): AccordionComponent;
+export declare function alert(text: string, variant: AlertComponent['variant'], opts?: {
+    title?: string;
+    icon?: string;
+    dismissible?: boolean;
+    actions?: ButtonComponent[];
+}): AlertComponent;
+export declare function tabGroup(tabs: TabItem[], opts?: {
+    title?: string;
+}): TabGroupComponent;
+export declare function notification(message: string, variant: NotificationComponent['variant'], opts?: {
+    icon?: string;
+    duration?: number;
+    showInline?: boolean;
+}): NotificationComponent;
+export declare function tooltip(text: string, tip: string, position?: TooltipComponent['position']): TooltipComponent;
+export declare function statCard(value: string, label: string, opts?: {
+    icon?: string;
+    trend?: StatCardComponent['trend'];
+}): StatCardComponent;
 export declare function toolAction(toolName: string, toolArgs?: Record<string, unknown>): UIActionPayload;
 export declare function messageAction(message: string): UIActionPayload;
 export declare function navigateAction(screen: SessionScreen): UIActionPayload;
@@ -114,6 +136,12 @@ export declare const uiComponents: {
     readonly divider: typeof divider;
     readonly textBlock: typeof textBlock;
     readonly carousel: typeof carousel;
+    readonly accordion: typeof accordion;
+    readonly alert: typeof alert;
+    readonly tabGroup: typeof tabGroup;
+    readonly notification: typeof notification;
+    readonly tooltip: typeof tooltip;
+    readonly statCard: typeof statCard;
     readonly toolAction: typeof toolAction;
     readonly messageAction: typeof messageAction;
     readonly navigateAction: typeof navigateAction;
