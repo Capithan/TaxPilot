@@ -4,6 +4,7 @@ import { ChatCompletionMessageParam, ChatCompletionTool } from 'openai/resources
 import {
   startIntakeSession,
   processIntakeResponse,
+  processStructuredIntakeResponse,
   getIntakeProgress,
   getIntakeSummary,
 } from '../services/intake.js';
@@ -80,14 +81,18 @@ const tools: ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'process_intake_response',
-      description: 'Submit the client answer to the current intake question and get the next question.',
+      description: 'Submit the client answer to the current intake question. Supports structured form data, single selection, multi-selection, or plain text answer.',
       parameters: {
         type: 'object',
         properties: {
           sessionId: { type: 'string', description: 'Session ID from start_intake' },
-          answer: { type: 'string', description: 'Client answer' },
+          answer: { type: 'string', description: 'Client answer (plain text)' },
+          step: { type: 'string', description: 'The intake step this submission applies to' },
+          formData: { type: 'object', description: 'Structured form field values (key-value pairs)' },
+          selection: { type: 'string', description: 'Single selection ID from a SelectionCard' },
+          selections: { type: 'array', items: { type: 'string' }, description: 'Multi-select option IDs' },
         },
-        required: ['sessionId', 'answer'],
+        required: ['sessionId'],
       },
     },
   },
@@ -238,7 +243,19 @@ function executeTool(name: string, args: Record<string, unknown>): string {
         });
       }
       case 'process_intake_response': {
-        const result = processIntakeResponse(args.sessionId as string, args.answer as string);
+        const step = args.step as string | undefined;
+        const formData = args.formData as Record<string, string> | undefined;
+        const selection = args.selection as string | undefined;
+        const selections = args.selections as string[] | undefined;
+
+        let result;
+        if (step && (formData || selection || selections)) {
+          result = processStructuredIntakeResponse(
+            args.sessionId as string, step, formData, selection, selections,
+          );
+        } else {
+          result = processIntakeResponse(args.sessionId as string, args.answer as string);
+        }
         return JSON.stringify(result);
       }
       case 'get_intake_progress': {

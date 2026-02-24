@@ -136,6 +136,203 @@ function createNewClient(id) {
     };
     return db.createClient(client);
 }
+/**
+ * Process a structured form submission from the UI.
+ *
+ * Accepts form field values, selection card choices, or multi-select
+ * selections and maps them directly onto the client profile before
+ * advancing to the next intake step.
+ */
+export function processStructuredIntakeResponse(sessionId, step, formData, selection, selections) {
+    const session = db.getSession(sessionId);
+    if (!session) {
+        return { success: false, message: 'Session not found' };
+    }
+    const client = db.getClient(session.clientId);
+    if (!client) {
+        return { success: false, message: 'Client not found' };
+    }
+    // Store raw response for audit trail
+    const answer = formData
+        ? JSON.stringify(formData)
+        : selections
+            ? selections.join(', ')
+            : selection || '';
+    session.responses.push({
+        step: session.currentStep,
+        question: `[structured:${step}]`,
+        answer,
+        timestamp: new Date(),
+    });
+    // Apply data directly to client profile
+    applyStructuredData(client, step, formData, selection, selections);
+    // Advance to next step (structured submissions complete the step in one go)
+    if (!session.completedSteps.includes(session.currentStep)) {
+        session.completedSteps.push(session.currentStep);
+    }
+    const currentIndex = INTAKE_STEPS.indexOf(session.currentStep);
+    if (currentIndex < INTAKE_STEPS.length - 1) {
+        session.currentStep = INTAKE_STEPS[currentIndex + 1];
+        if (session.currentStep === 'complete') {
+            session.status = 'completed';
+            client.intakeCompleted = true;
+            client.intakeCompletedAt = new Date();
+            db.updateClient(client.id, client);
+            db.updateSession(sessionId, session);
+            return {
+                success: true,
+                intakeCompleted: true,
+                client,
+                message: 'Congratulations! Your intake is complete.',
+            };
+        }
+        db.updateSession(sessionId, session);
+        return {
+            success: true,
+            nextQuestion: INTAKE_QUESTIONS[session.currentStep][0],
+            currentStep: session.currentStep,
+            stepCompleted: true,
+            client,
+        };
+    }
+    db.updateSession(sessionId, session);
+    return {
+        success: true,
+        currentStep: session.currentStep,
+        client,
+        message: 'Intake processing complete.',
+    };
+}
+/**
+ * Apply structured form/selection data directly to the client profile.
+ */
+function applyStructuredData(client, step, formData, selection, selections) {
+    switch (step) {
+        case 'personal_info': {
+            if (formData) {
+                if (formData.firstName)
+                    client.firstName = formData.firstName;
+                if (formData.lastName)
+                    client.lastName = formData.lastName;
+                if (formData.email)
+                    client.email = formData.email;
+                if (formData.phone)
+                    client.phone = formData.phone;
+                if (formData.dateOfBirth)
+                    client.dateOfBirth = formData.dateOfBirth;
+                if (formData.address) {
+                    // Parse simple address string
+                    const parts = formData.address.split(',').map(s => s.trim());
+                    client.address = {
+                        street: parts[0] || '',
+                        city: parts[1] || '',
+                        state: parts[2] || '',
+                        zipCode: parts[3] || '',
+                    };
+                }
+            }
+            break;
+        }
+        case 'filing_status': {
+            if (selection) {
+                client.filingStatus = selection;
+            }
+            break;
+        }
+        case 'dependents_choice': {
+            // If user chose "no", nothing to do — step advances automatically
+            break;
+        }
+        case 'dependents_add': {
+            if (formData) {
+                const dep = {
+                    firstName: formData.depFirstName || '',
+                    lastName: formData.depLastName || '',
+                    relationship: formData.depRelationship || '',
+                    dateOfBirth: formData.depDOB || '',
+                    livesWithClient: true,
+                    monthsLivedWithClient: parseInt(formData.depMonths || '12', 10),
+                };
+                client.dependents.push(dep);
+            }
+            break;
+        }
+        case 'employment': {
+            if (formData) {
+                const emp = {
+                    employerName: formData.employerName || '',
+                    jobTitle: formData.jobTitle || '',
+                    isCurrentJob: true,
+                    startDate: '',
+                    incomeType: formData.incomeType || 'W2',
+                    estimatedIncome: formData.estimatedIncome ? parseInt(formData.estimatedIncome, 10) : undefined,
+                };
+                client.employmentInfo.push(emp);
+                if (formData.selfEmployed === 'yes') {
+                    client.hasBusinessIncome = true;
+                    if (!client.incomeTypes.includes('self_employment_1099nec')) {
+                        client.incomeTypes.push('self_employment_1099nec');
+                    }
+                }
+                if (formData.incomeType === 'W2' || formData.incomeType === 'both') {
+                    if (!client.incomeTypes.includes('wages_w2')) {
+                        client.incomeTypes.push('wages_w2');
+                    }
+                }
+            }
+            break;
+        }
+        case 'income_types': {
+            if (selections) {
+                const incomeTypes = selections;
+                client.incomeTypes = [...new Set([...client.incomeTypes, ...incomeTypes])];
+                if (selections.includes('crypto_income'))
+                    client.hasCrypto = true;
+                if (selections.includes('rental_income'))
+                    client.hasRentalProperty = true;
+                if (selections.includes('foreign_income'))
+                    client.hasForeignAccounts = true;
+            }
+            break;
+        }
+        case 'deductions': {
+            if (selections) {
+                const deductions = selections;
+                client.deductions = [...new Set([...client.deductions, ...deductions])];
+                if (selections.includes('business_expenses'))
+                    client.hasBusinessIncome = true;
+            }
+            break;
+        }
+        case 'special_situations': {
+            if (selections) {
+                if (selections.includes('crypto')) {
+                    client.hasCrypto = true;
+                    if (!client.incomeTypes.includes('crypto_income'))
+                        client.incomeTypes.push('crypto_income');
+                }
+                if (selections.includes('foreign_accounts')) {
+                    client.hasForeignAccounts = true;
+                    if (!client.incomeTypes.includes('foreign_income'))
+                        client.incomeTypes.push('foreign_income');
+                }
+                if (selections.includes('real_estate')) {
+                    client.hasRentalProperty = true;
+                }
+            }
+            break;
+        }
+        case 'document_upload': {
+            // Selection: ready / need_checklist / skip — all advance the step
+            break;
+        }
+        case 'review': {
+            // answer = 'confirmed' or 'changes_needed'
+            break;
+        }
+    }
+    db.updateClient(client.id, client);
+}
 export function processIntakeResponse(sessionId, answer) {
     const session = db.getSession(sessionId);
     if (!session) {

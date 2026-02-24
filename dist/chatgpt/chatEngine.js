@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import { startIntakeSession, processIntakeResponse, getIntakeProgress, getIntakeSummary, } from '../services/intake.js';
+import { startIntakeSession, processIntakeResponse, processStructuredIntakeResponse, getIntakeProgress, getIntakeSummary, } from '../services/intake.js';
 import { generateDocumentChecklist, markDocumentCollected, getPendingDocuments, formatChecklistForDisplay, } from '../services/checklist.js';
 import { createBatchDocumentReminder, } from '../services/reminders.js';
 import { routeClientToTaxPro, createAppointment, getAppointmentEstimate, getTaxProRecommendations, } from '../services/routing.js';
@@ -54,14 +54,18 @@ const tools = [
         type: 'function',
         function: {
             name: 'process_intake_response',
-            description: 'Submit the client answer to the current intake question and get the next question.',
+            description: 'Submit the client answer to the current intake question. Supports structured form data, single selection, multi-selection, or plain text answer.',
             parameters: {
                 type: 'object',
                 properties: {
                     sessionId: { type: 'string', description: 'Session ID from start_intake' },
-                    answer: { type: 'string', description: 'Client answer' },
+                    answer: { type: 'string', description: 'Client answer (plain text)' },
+                    step: { type: 'string', description: 'The intake step this submission applies to' },
+                    formData: { type: 'object', description: 'Structured form field values (key-value pairs)' },
+                    selection: { type: 'string', description: 'Single selection ID from a SelectionCard' },
+                    selections: { type: 'array', items: { type: 'string' }, description: 'Multi-select option IDs' },
                 },
-                required: ['sessionId', 'answer'],
+                required: ['sessionId'],
             },
         },
     },
@@ -190,7 +194,7 @@ const tools = [
                     clientId: { type: 'string' },
                     taxProId: { type: 'string' },
                     scheduledAt: { type: 'string', description: 'ISO datetime string' },
-                    type: { type: 'string', enum: ['virtual', 'in-person'] },
+                    type: { type: 'string', enum: ['virtual', 'in_person'] },
                 },
                 required: ['clientId', 'taxProId', 'scheduledAt'],
             },
@@ -211,7 +215,17 @@ function executeTool(name, args) {
                 });
             }
             case 'process_intake_response': {
-                const result = processIntakeResponse(args.sessionId, args.answer);
+                const step = args.step;
+                const formData = args.formData;
+                const selection = args.selection;
+                const selections = args.selections;
+                let result;
+                if (step && (formData || selection || selections)) {
+                    result = processStructuredIntakeResponse(args.sessionId, step, formData, selection, selections);
+                }
+                else {
+                    result = processIntakeResponse(args.sessionId, args.answer);
+                }
                 return JSON.stringify(result);
             }
             case 'get_intake_progress': {

@@ -8,6 +8,7 @@ import { Request, Response } from 'express';
 import {
   startIntakeSession,
   processIntakeResponse,
+  processStructuredIntakeResponse,
   getIntakeProgress,
   getIntakeSummary,
 } from '../services/intake.js';
@@ -66,8 +67,8 @@ import {
 } from '../ui/formatters/reminders.js';
 import type { UIResponse } from '../ui/types.js';
 
-/** Wrap a UIResponse into the MCP content block format. */
-function toMcpContent(uiResp: UIResponse): { content: Array<{ type: string; text: string }> } {
+/** Wrap a UIResponse or StructuredUIResponse into the MCP content block format. */
+function toMcpContent(uiResp: UIResponse | Record<string, unknown>): { content: Array<{ type: string; text: string }> } {
   return { content: [{ type: 'text', text: JSON.stringify(uiResp, null, 2) }] };
 }
 
@@ -474,9 +475,21 @@ function handleToolCall(name: string, args: Record<string, unknown>): { content:
       }
 
       case 'process_intake_response': {
-        const result = processIntakeResponse(args.sessionId as string, args.answer as string);
-        const intakeProgress = getIntakeProgress(args.sessionId as string);
-        return toMcpContent(formatIntakeResponse(result, args.sessionId as string, intakeProgress ? {
+        const sid = args.sessionId as string;
+        const step = args.step as string | undefined;
+        const formData = args.formData as Record<string, string> | undefined;
+        const selection = args.selection as string | undefined;
+        const selections = args.selections as string[] | undefined;
+
+        let result;
+        if (step && (formData || selection || selections)) {
+          result = processStructuredIntakeResponse(sid, step, formData, selection, selections);
+        } else {
+          result = processIntakeResponse(sid, args.answer as string);
+        }
+
+        const intakeProgress = getIntakeProgress(sid);
+        return toMcpContent(formatIntakeResponse(result, sid, intakeProgress ? {
           completedSteps: intakeProgress.completedSteps,
           totalSteps: intakeProgress.totalSteps,
           percentComplete: intakeProgress.percentComplete,
