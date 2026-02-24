@@ -94,17 +94,27 @@ import {
 
 import type { UIResponse } from './ui/types.js';
 import { toReadableText } from './ui/toReadableText.js';
+import { toHtmlWidget } from './ui/toHtmlWidget.js';
 
 /** MCP Apps Widget resource URI */
-const WIDGET_RESOURCE_URI = 'ui://taxpilot/widget.html';
+const WIDGET_RESOURCE_URI_BASE = 'ui://taxpilot/widget.html';
 
 /** Store the latest tool result so the widget can render without the postMessage bridge */
 let latestToolResult: Record<string, unknown> | null = null;
+let toolResultVersion = 0;
+
+/** Get the current widget resource URI (versioned so ChatGPT fetches fresh HTML) */
+function getWidgetResourceUri(): string {
+  return toolResultVersion > 0
+    ? `${WIDGET_RESOURCE_URI_BASE}?v=${toolResultVersion}`
+    : WIDGET_RESOURCE_URI_BASE;
+}
 
 /** Wrap a UIResponse into the MCP content block format with structuredContent for Apps SDK. */
 function toMcpContent(uiResp: UIResponse | Record<string, unknown>): { content: Array<{ type: 'text'; text: string }>; structuredContent: Record<string, unknown> } {
   const sc = uiResp as unknown as Record<string, unknown>;
   latestToolResult = sc;
+  toolResultVersion++;
   const readable = toReadableText(sc);
   return {
     content: [{ type: 'text' as const, text: readable }],
@@ -545,12 +555,12 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
     ];
 
-  // Inject MCP Apps UI metadata into all tools
+  // Inject MCP Apps UI metadata into all tools (versioned URI for fresh HTML)
   const tools = rawTools.map(tool => ({
     ...tool,
     _meta: {
-      ui: { resourceUri: WIDGET_RESOURCE_URI },
-      'ui/resourceUri': WIDGET_RESOURCE_URI,
+      ui: { resourceUri: getWidgetResourceUri() },
+      'ui/resourceUri': getWidgetResourceUri(),
     },
   }));
 
@@ -562,32 +572,41 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => {
   return {
     resources: [{
       name: 'TaxPilot Widget',
-      uri: WIDGET_RESOURCE_URI,
+      uri: WIDGET_RESOURCE_URI_BASE,
       mimeType: 'text/html;profile=mcp-app',
       description: 'H&R Block TaxPilot interactive UI widget',
     }],
   };
 });
 
-// Handle resource reading (serve the widget HTML with embedded tool data)
+// Handle resource reading (serve pre-rendered static HTML when data available)
 server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
   const { uri } = request.params;
-  if (uri === WIDGET_RESOURCE_URI) {
-    // Read widget HTML from public/ directory
+  // Accept base URI or any versioned variant (?v=N)
+  if (uri.startsWith(WIDGET_RESOURCE_URI_BASE)) {
+    // If we have tool data, produce static pre-rendered HTML (no JS needed)
+    if (latestToolResult) {
+      const staticHtml = toHtmlWidget(latestToolResult);
+      if (staticHtml) {
+        return {
+          contents: [{
+            uri,
+            mimeType: 'text/html;profile=mcp-app',
+            text: staticHtml,
+          }],
+        };
+      }
+    }
+    // Fallback: return interactive widget
     const { readFileSync } = await import('fs');
     const { join, dirname } = await import('path');
     const { fileURLToPath } = await import('url');
     const thisDir = dirname(fileURLToPath(import.meta.url));
     const widgetPath = join(thisDir, '..', 'public', 'taxpilot-widget.html');
-    let html = readFileSync(widgetPath, 'utf-8');
-    // Inject latest tool data so widget renders even without the postMessage bridge
-    if (latestToolResult) {
-      const dataScript = `<script>window.__TAXPILOT_DATA__ = ${JSON.stringify(latestToolResult)};</script>`;
-      html = html.replace('</head>', `${dataScript}\n</head>`);
-    }
+    const html = readFileSync(widgetPath, 'utf-8');
     return {
       contents: [{
-        uri: WIDGET_RESOURCE_URI,
+        uri,
         mimeType: 'text/html;profile=mcp-app',
         text: html,
       }],
