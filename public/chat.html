@@ -1786,6 +1786,57 @@
     scrollToBottom();
   }
 
+  /**
+   * Render a structured UI response directly (bypasses tryParse).
+   * Optionally shows the ChatGPT text reply above the structured components.
+   */
+  function addStructuredMessage(structuredUI, textReply) {
+    var welcome = document.getElementById('welcome');
+    if (welcome) welcome.remove();
+
+    var container = document.getElementById('chatMessages');
+    var div = document.createElement('div');
+    div.className = 'message msg-assistant';
+
+    // Avatar
+    var avatar = document.createElement('div');
+    avatar.className = 'message-avatar';
+    avatar.innerHTML = '<img src="hrb-logo.png" alt="TaxPilot">';
+
+    // Body
+    var body = document.createElement('div');
+    body.className = 'message-body';
+
+    var sender = document.createElement('div');
+    sender.className = 'message-sender';
+    sender.textContent = 'TaxPilot';
+
+    var contentDiv = document.createElement('div');
+    contentDiv.className = 'message-content';
+
+    // Render structured UI components
+    contentDiv.innerHTML = uiRenderer.render(structuredUI);
+
+    body.appendChild(sender);
+    body.appendChild(contentDiv);
+    div.appendChild(avatar);
+    div.appendChild(body);
+    container.appendChild(div);
+
+    // Attach event handlers after DOM insertion
+    uiRenderer.bind(contentDiv);
+
+    // Trigger confetti for success banners
+    if (structuredUI.components) {
+      var hasConfetti = structuredUI.components.some(function(c) {
+        return c.type === 'banner' && c.confetti;
+      });
+      if (hasConfetti) triggerConfetti(contentDiv);
+    }
+
+    scrollToBottom();
+  }
+
   function triggerConfetti(container) {
     var particles = ['🎉', '🎊', '✨', '⭐', '🌟', '💚'];
     for (var i = 0; i < 8; i++) {
@@ -1862,7 +1913,14 @@
 
       var data = await resp.json();
       chatId = data.chatId;
-      addMessage('assistant', data.reply);
+
+      // If the backend returned structured UI (from intake/progress tools),
+      // render it directly instead of relying on tryParse to find JSON in text.
+      if (data.structuredUI && data.structuredUI.components) {
+        addStructuredMessage(data.structuredUI, data.reply);
+      } else {
+        addMessage('assistant', data.reply);
+      }
     } catch (err) {
       removeTypingIndicator();
       addMessage('assistant', '\u26A0\uFE0F Sorry, something went wrong: ' + err.message + '\n\nPlease make sure your OPENAI_API_KEY is configured.');
