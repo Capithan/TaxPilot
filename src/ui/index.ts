@@ -47,6 +47,7 @@ export * as checklistUI from './formatters/checklist.js';
 export * as routingUI from './formatters/routing.js';
 export * as remindersUI from './formatters/reminders.js';
 export * as flowUI from './formatters/flow.js';
+export * as welcomeUI from './formatters/welcome.js';
 
 // ── Structured UI Component System ─────────────────────────────
 export type {

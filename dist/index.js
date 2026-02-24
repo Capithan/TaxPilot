@@ -14,13 +14,14 @@ import { formatDocumentChecklist, formatDocumentCollected, formatPendingDocument
 import { formatComplexityScore, formatRoutingResult, formatTaxProRecommendations, formatAppointmentEstimate, formatAppointmentCreated, formatTaxProList, formatClientProfile, } from './ui/formatters/routing.js';
 import { formatRemindersCreated, formatRemindersList, formatReminderSent, } from './ui/formatters/reminders.js';
 import { formatFlowStatus, formatFlowAdvanced, formatSummaryConfirmed, formatSchedulingPreferences, formatTaxProSelected, formatFlowProgress, } from './ui/formatters/flow.js';
+import { formatWelcomeScreen } from './ui/formatters/welcome.js';
 import { toReadableText } from './ui/toReadableText.js';
 import { toHtmlWidget } from './ui/toHtmlWidget.js';
 /** MCP Apps Widget resource URI */
 const WIDGET_RESOURCE_URI_BASE = 'ui://taxpilot/widget.html';
 /** Store the latest tool result so the widget can render without the postMessage bridge */
-let latestToolResult = null;
-let toolResultVersion = 0;
+let latestToolResult = formatWelcomeScreen();
+let toolResultVersion = latestToolResult ? 1 : 0;
 /** Get the current widget resource URI (versioned so ChatGPT fetches fresh HTML) */
 function getWidgetResourceUri() {
     return toolResultVersion > 0
@@ -52,6 +53,16 @@ const server = new Server({
 // Define all available tools (with MCP Apps UI metadata injected)
 server.setRequestHandler(ListToolsRequestSchema, async () => {
     const rawTools = [
+        // UI Render Tool (initial experience)
+        {
+            name: 'render_welcome_ui',
+            description: 'Render the TaxPilot home screen with buttons to start intake, view progress, or jump to the document checklist. Call this at conversation start so the user sees the UI immediately.',
+            inputSchema: {
+                type: 'object',
+                properties: {},
+                required: [],
+            },
+        },
         // Intake Tools
         {
             name: 'start_intake',
@@ -467,6 +478,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         _meta: {
             ui: { resourceUri: getWidgetResourceUri() },
             'ui/resourceUri': getWidgetResourceUri(),
+            'openai/outputTemplate': getWidgetResourceUri(),
         },
     }));
     return { tools };
@@ -522,6 +534,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
     try {
         switch (name) {
+            case 'render_welcome_ui': {
+                return toMcpContent(formatWelcomeScreen());
+            }
             // Intake Tools
             case 'start_intake': {
                 const result = startIntakeSession(args?.clientId);
@@ -773,6 +788,11 @@ server.setRequestHandler(ListPromptsRequestSchema, async () => {
     return {
         prompts: [
             {
+                name: 'show_taxpilot_ui',
+                description: 'Render the TaxPilot home UI and offer intake, checklist, and booking shortcuts.',
+                arguments: [],
+            },
+            {
                 name: 'new_client_intake',
                 description: 'Start a complete intake process for a new tax client following the defined conversation flow',
                 arguments: [],
@@ -805,6 +825,18 @@ server.setRequestHandler(ListPromptsRequestSchema, async () => {
 server.setRequestHandler(GetPromptRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
     switch (name) {
+        case 'show_taxpilot_ui':
+            return {
+                messages: [
+                    {
+                        role: 'user',
+                        content: {
+                            type: 'text',
+                            text: 'Mount the TaxPilot home UI so the user can tap buttons. First call the render_welcome_ui tool (it owns the output template). Then, based on what they pick, call start_intake to begin the flow, get_conversation_flow to resume, or generate_document_checklist if they just need documents.',
+                        },
+                    },
+                ],
+            };
         case 'new_client_intake':
             return {
                 messages: [

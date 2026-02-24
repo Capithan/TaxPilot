@@ -18,6 +18,7 @@ export * as checklistUI from './formatters/checklist.js';
 export * as routingUI from './formatters/routing.js';
 export * as remindersUI from './formatters/reminders.js';
 export * as flowUI from './formatters/flow.js';
+export * as welcomeUI from './formatters/welcome.js';
 export { uiComponents, structuredResponse, primaryButton, secondaryButton, dangerButton, formField, formGroup, multiSelect, selectionCard, statusBadge, stepProgress, progressBar, infoCard, appointmentSummary, taxProCard, checklist, banner, divider, textBlock, carousel, accordion, alert, tabGroup, notification, tooltip, statCard, toolAction, messageAction, navigateAction, submitFormAction, StructuredResponseBuilder, } from './components.builders.js';
 // ── Theme ───────────────────────────────────────────────────────
 export { hrbTheme, getVariantColors, getThemeCSSVars } from './theme.js';

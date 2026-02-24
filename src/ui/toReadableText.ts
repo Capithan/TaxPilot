@@ -24,11 +24,16 @@ function field(label: string, value: string): string {
   return `  ${label}: ${value}\n`;
 }
 
+function normalizeType(raw: string | undefined): string {
+  if (!raw) return '';
+  return raw.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
+}
+
 // ─── StructuredUIResponse (intake formatters) ────────────────────────────────
 
 function renderComponent(c: Record<string, unknown>): string {
-  if (!c || !c.type) return '';
-  const type = c.type as string;
+  if (!c || (!c.type && !c.component)) return '';
+  const type = normalizeType((c.type || c.component) as string | undefined);
 
   switch (type) {
     case 'banner':
@@ -110,6 +115,19 @@ function renderComponent(c: Record<string, unknown>): string {
         out += field(`${icon}${f.label}`, f.value);
       });
       if (c.highlight) out += line(`  ℹ️ ${c.highlight}`);
+      return out;
+    }
+
+    case 'checklist': {
+      let out = '';
+      const title = c.title as string || 'Checklist';
+      out += line(`\n📋 ${title}`);
+      const items = (c.items || []) as Array<{ text?: string; status?: string; description?: string }>;
+      items.forEach(item => {
+        const status = item.status ? ` [${item.status}]` : '';
+        const desc = item.description ? ` — ${item.description}` : '';
+        out += bullet(`${item.text || ''}${status}${desc}`, 2);
+      });
       return out;
     }
 

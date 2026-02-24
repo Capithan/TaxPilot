@@ -18,11 +18,16 @@ function bullet(text, indent = 0) {
 function field(label, value) {
     return `  ${label}: ${value}\n`;
 }
+function normalizeType(raw) {
+    if (!raw)
+        return '';
+    return raw.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
+}
 // ─── StructuredUIResponse (intake formatters) ────────────────────────────────
 function renderComponent(c) {
-    if (!c || !c.type)
+    if (!c || (!c.type && !c.component))
         return '';
-    const type = c.type;
+    const type = normalizeType((c.type || c.component));
     switch (type) {
         case 'banner':
             return line(`💬 ${c.text || ''}`);
@@ -105,6 +110,18 @@ function renderComponent(c) {
             });
             if (c.highlight)
                 out += line(`  ℹ️ ${c.highlight}`);
+            return out;
+        }
+        case 'checklist': {
+            let out = '';
+            const title = c.title || 'Checklist';
+            out += line(`\n📋 ${title}`);
+            const items = (c.items || []);
+            items.forEach(item => {
+                const status = item.status ? ` [${item.status}]` : '';
+                const desc = item.description ? ` — ${item.description}` : '';
+                out += bullet(`${item.text || ''}${status}${desc}`, 2);
+            });
             return out;
         }
         case 'button': {
