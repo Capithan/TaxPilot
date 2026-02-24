@@ -473,14 +473,23 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
     ];
     // Inject MCP Apps UI metadata into all tools (versioned URI for fresh HTML)
-    const tools = rawTools.map(tool => ({
-        ...tool,
-        _meta: {
+    const templateTools = new Set(['render_welcome_ui']);
+    const tools = rawTools.map(tool => {
+        const meta = {
             ui: { resourceUri: getWidgetResourceUri() },
             'ui/resourceUri': getWidgetResourceUri(),
-            'openai/outputTemplate': getWidgetResourceUri(),
-        },
-    }));
+            // Only the dedicated render tool should advertise the output template.
+            // Data tools stay template-free to avoid remounting the iframe.
+            ...(templateTools.has(tool.name) ? { 'openai/outputTemplate': getWidgetResourceUri() } : {}),
+            // Friendly invocation copy for ChatGPT Apps surfaces.
+            'openai/toolInvocation/invoking': templateTools.has(tool.name) ? 'Rendering TaxPilot UI…' : 'Working…',
+            'openai/toolInvocation/invoked': templateTools.has(tool.name) ? 'Rendered TaxPilot UI.' : 'Done.',
+        };
+        return {
+            ...tool,
+            _meta: meta,
+        };
+    });
     return { tools };
 });
 // Handle resource listing (MCP Apps widget)
