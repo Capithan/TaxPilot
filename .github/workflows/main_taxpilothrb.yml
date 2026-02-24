@@ -9,6 +9,11 @@ on:
       - main
   workflow_dispatch:
 
+# Prevent concurrent deployments from hammering Azure AD (causes 429 throttle)
+concurrency:
+  group: deploy-taxpilothrb
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -54,6 +59,8 @@ jobs:
           client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_7A0CEF935A4E4FE892BBDB8F2172D39F }}
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_9DC74DEAFAE84BF3B10D310AC2661BB8 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_A702AEBD6E0A415F981C79F7B0BB4A9B }}
+        timeout-minutes: 5
+        continue-on-error: false
 
       - name: 'Deploy to Azure Web App'
         id: deploy-to-webapp
