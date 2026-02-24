@@ -29,6 +29,15 @@ import {
   getTaxProRecommendations,
 } from '../services/routing.js';
 
+// UI Formatters — produce StructuredUIResponse JSON with interactive components
+import {
+  formatIntakeStart,
+  formatIntakeResponse,
+  formatIntakeProgress,
+  formatClientSummary,
+} from '../ui/formatters/intake.js';
+import { db } from '../database/index.js';
+
 // ─── System prompt ───────────────────────────────────────────────────────────
 const SYSTEM_PROMPT = `You are TaxPilot, a friendly and professional AI tax intake assistant.
 
@@ -45,16 +54,22 @@ Your job is to guide clients through:
 - Use clear formatting (headings, bullets, emoji sparingly)
 
 ## Rules
-- Ask ONE question at a time during intake.
 - Always start with start_intake for new clients.
 - Never give tax advice — say "Your tax professional will advise on that."
 - Confirm before booking appointments.
 - Keep sensitive data handling professional.
 
+## Structured UI Commands
+The frontend sends structured commands when users interact with UI components:
+- \`[tool:toolName] {...params}\` — the user clicked a button that should invoke a tool. Extract the tool name and parameters, then call that tool directly with those exact parameters.
+- \`[form] {...formData}\` — the user submitted a form. The form data should be passed to the appropriate intake processing tool.
+
+When you see these patterns, ALWAYS call the indicated tool with the provided parameters. Do not ask the user to rephrase. Keep your text response brief (1-2 sentences acknowledging progress) — the interactive UI components will be rendered automatically from the tool results.
+
 ## Flow
-1. Call start_intake → get sessionId + clientId + first question
-2. Present question to user, wait for answer
-3. Call process_intake_response with their answer → get next question
+1. Call start_intake → get sessionId + clientId + first question (UI forms render automatically)
+2. User interacts with the form/selection UI → their answer comes back as a tool command
+3. Call process_intake_response with their answer → next step's UI renders automatically
 4. Repeat until intake is complete
 5. Call get_client_summary to show overview
 6. Call generate_checklist to show required documents
@@ -230,17 +245,31 @@ const tools: ChatCompletionTool[] = [
 ];
 
 // ─── Execute a tool call against local services ──────────────────────────────
-function executeTool(name: string, args: Record<string, unknown>): string {
+
+/** Result of executeTool including optional structured UI for the frontend. */
+interface ToolResult {
+  /** Text sent back to ChatGPT as tool call result (kept short/contextual) */
+  text: string;
+  /** Structured UI JSON to render on the frontend (bypasses ChatGPT text) */
+  structuredUI?: Record<string, unknown>;
+}
+
+function executeTool(name: string, args: Record<string, unknown>): ToolResult {
   try {
     switch (name) {
       case 'start_intake': {
         const result = startIntakeSession(args?.clientId as string | undefined);
-        return JSON.stringify({
-          sessionId: result.session.id,
-          clientId: result.client.id,
-          currentStep: result.currentStep,
-          nextQuestion: result.nextQuestion,
-        });
+        // Build structured UI with the interactive form for step 1
+        const structuredUI = formatIntakeStart(result);
+        return {
+          text: JSON.stringify({
+            sessionId: result.session.id,
+            clientId: result.client.id,
+            currentStep: result.currentStep,
+            nextQuestion: result.nextQuestion,
+          }),
+          structuredUI,
+        };
       }
       case 'process_intake_response': {
         const step = args.step as string | undefined;
@@ -256,46 +285,75 @@ function executeTool(name: string, args: Record<string, unknown>): string {
         } else {
           result = processIntakeResponse(args.sessionId as string, args.answer as string);
         }
-        return JSON.stringify(result);
+
+        // Build structured UI for the next step
+        const sessionId = args.sessionId as string;
+        const progressInfo = getIntakeProgress(sessionId);
+        const structuredUI = formatIntakeResponse(
+          result,
+          sessionId,
+          progressInfo ? {
+            completedSteps: progressInfo.completedSteps as string[],
+            totalSteps: progressInfo.totalSteps,
+            percentComplete: progressInfo.percentComplete,
+          } : undefined,
+        );
+
+        return {
+          text: JSON.stringify(result),
+          structuredUI,
+        };
       }
       case 'get_intake_progress': {
         const progress = getIntakeProgress(args.sessionId as string);
-        return JSON.stringify(progress);
+        const structuredUI = formatIntakeProgress(progress, args.sessionId as string);
+        return {
+          text: JSON.stringify(progress),
+          structuredUI,
+        };
       }
       case 'get_client_summary': {
-        return getIntakeSummary(args.clientId as string);
+        const summaryText = getIntakeSummary(args.clientId as string);
+        const client = db.getClient(args.clientId as string);
+        if (client) {
+          const structuredUI = formatClientSummary(client, summaryText);
+          return { text: summaryText, structuredUI };
+        }
+        return { text: summaryText };
       }
       case 'generate_checklist': {
         const checklist = generateDocumentChecklist(args.clientId as string);
-        return formatChecklistForDisplay(checklist);
+        return { text: formatChecklistForDisplay(checklist) };
       }
       case 'get_pending_documents': {
         const pending = getPendingDocuments(args.clientId as string);
-        return JSON.stringify(pending);
+        return { text: JSON.stringify(pending) };
       }
       case 'mark_document_collected': {
         const result = markDocumentCollected(args.clientId as string, args.documentId as string);
-        return JSON.stringify(result);
+        return { text: JSON.stringify(result) };
       }
       case 'create_reminders': {
         const reminder = createBatchDocumentReminder(
           args.clientId as string,
           (args.appointmentId as string) || 'pending'
         );
-        return reminder
-          ? JSON.stringify(reminder)
-          : JSON.stringify({ message: 'No pending documents — no reminder needed.' });
+        return {
+          text: reminder
+            ? JSON.stringify(reminder)
+            : JSON.stringify({ message: 'No pending documents — no reminder needed.' }),
+        };
       }
       case 'route_to_tax_pro': {
         const result = routeClientToTaxPro(args.clientId as string);
-        return JSON.stringify(result);
+        return { text: JSON.stringify(result) };
       }
       case 'get_recommendations': {
-        return getTaxProRecommendations(args.clientId as string);
+        return { text: getTaxProRecommendations(args.clientId as string) };
       }
       case 'get_appointment_estimate': {
         const est = getAppointmentEstimate(args.clientId as string);
-        return est.message;
+        return { text: est.message };
       }
       case 'create_appointment': {
         const appt = createAppointment(
@@ -304,13 +362,13 @@ function executeTool(name: string, args: Record<string, unknown>): string {
           new Date(args.scheduledAt as string),
           (args.type as 'virtual' | 'in_person') || 'virtual'
         );
-        return JSON.stringify(appt);
+        return { text: JSON.stringify(appt) };
       }
       default:
-        return JSON.stringify({ error: `Unknown tool: ${name}` });
+        return { text: JSON.stringify({ error: `Unknown tool: ${name}` }) };
     }
   } catch (error) {
-    return JSON.stringify({ error: error instanceof Error ? error.message : String(error) });
+    return { text: JSON.stringify({ error: error instanceof Error ? error.message : String(error) }) };
   }
 }
 
@@ -341,17 +399,22 @@ export function getOrCreateChatSession(chatId: string): ChatSession {
 /**
  * Send a user message and get an AI response with automatic function calling.
  * The OpenAI SDK handles the conversation; tool calls are executed locally.
+ * When tools produce structured UI (forms, cards, etc.), the UI JSON is
+ * returned alongside the text reply so the frontend can render it directly.
  */
 export async function chat(
   chatId: string,
   userMessage: string,
   options?: { model?: string }
-): Promise<{ reply: string; chatId: string }> {
+): Promise<{ reply: string; chatId: string; structuredUI?: Record<string, unknown> }> {
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const model = options?.model || process.env.OPENAI_MODEL || 'gpt-4o';
 
   const session = getOrCreateChatSession(chatId);
   session.messages.push({ role: 'user', content: userMessage });
+
+  // Track the last structured UI produced by any tool call in this turn
+  let lastStructuredUI: Record<string, unknown> | undefined;
 
   // Loop: let ChatGPT call tools until it produces a final text reply
   let maxIterations = 10; // safety limit
@@ -374,12 +437,17 @@ export async function chat(
         const fn = 'function' in toolCall ? (toolCall as any).function : null;
         if (!fn) continue;
         const args = JSON.parse(fn.arguments);
-        const result = executeTool(fn.name, args);
+        const toolResult = executeTool(fn.name, args);
+
+        // Capture structured UI if the tool produced one
+        if (toolResult.structuredUI) {
+          lastStructuredUI = toolResult.structuredUI;
+        }
 
         session.messages.push({
           role: 'tool',
           tool_call_id: toolCall.id,
-          content: result,
+          content: toolResult.text,
         });
       }
       continue; // go around the loop — ChatGPT may want to call more tools
@@ -389,10 +457,11 @@ export async function chat(
     return {
       reply: assistantMessage.content || '',
       chatId: session.id,
+      structuredUI: lastStructuredUI,
     };
   }
 
-  return { reply: 'I ran into a processing limit. Please try again.', chatId };
+  return { reply: 'I ran into a processing limit. Please try again.', chatId, structuredUI: lastStructuredUI };
 }
 
 /**
