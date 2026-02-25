@@ -281,6 +281,7 @@ function renderStatusBadge(c) {
 }
 
 function renderFormGroup(c) {
+  var fid = 'form-' + (++_formId);
   const title = c.title ? '<div class="tp-form-title">' + esc(c.title) + '</div>' : '';
   const subtitle = c.subtitle ? '<div class="tp-form-desc">' + esc(c.subtitle) + '</div>' : '';
   const fields = (c.fields || []).map(function(f) {
@@ -289,16 +290,19 @@ function renderFormGroup(c) {
     const fType = f.fieldType || f.type || 'text';
     if (fType === 'select') {
       const opts = (f.options || []).map(function(o) { return '<option value="' + esc(o.value) + '">' + esc(o.label) + '</option>'; }).join('');
-      input = '<select class="tp-input tp-select"><option value="" disabled selected>' + esc(f.placeholder || 'Select...') + '</option>' + opts + '</select>';
+      input = '<select class="tp-input tp-select" data-field-id="' + esc(f.id || f.label) + '"><option value="" disabled selected>' + esc(f.placeholder || 'Select...') + '</option>' + opts + '</select>';
     } else if (fType === 'textarea') {
-      input = '<textarea class="tp-input tp-textarea" placeholder="' + esc(f.placeholder || '') + '" rows="3"></textarea>';
+      input = '<textarea class="tp-input tp-textarea" data-field-id="' + esc(f.id || f.label) + '" placeholder="' + esc(f.placeholder || '') + '" rows="3"></textarea>';
     } else {
-      input = '<input type="' + esc(fType) + '" class="tp-input" placeholder="' + esc(f.placeholder || '') + '">';
+      input = '<input type="' + esc(fType) + '" class="tp-input" data-field-id="' + esc(f.id || f.label) + '" placeholder="' + esc(f.placeholder || '') + '">';
     }
     const help = f.helperText ? '<div class="tp-field-help">' + esc(f.helperText) + '</div>' : '';
     return '<div class="tp-field"><label class="tp-field-label">' + esc(f.label) + required + '</label>' + input + help + '</div>';
   }).join('');
-  return '<div class="tp-form-group">' + title + subtitle + '<div class="tp-form-fields">' + fields + '</div><div class="tp-form-note">\\uD83D\\uDCAC Answer in the chat to continue</div></div>';
+  var footer = c.submitLabel
+    ? '<button class="tp-btn tp-btn--primary tp-btn--lg tp-btn-submit" data-form-submit="' + fid + '">' + esc(c.submitLabel) + '</button>'
+    : '<div class="tp-form-note">\\uD83D\\uDCAC Answer in the chat to continue</div>';
+  return '<div class="tp-form-group" data-form-id="' + fid + '">' + title + subtitle + '<div class="tp-form-fields">' + fields + '</div>' + footer + '</div>';
 }
 
 function renderSelectionCard(c) {

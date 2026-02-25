@@ -386,7 +386,7 @@ app.get('/api/tools', (_req, res) => {
 // ── MCP Apps Widget Resource URI ────────────────────────────────────────────
 // Version the URI path itself (not just query string) to bust ChatGPT's template cache.
 // Bump this whenever the widget HTML/JS/CSS changes.
-const WIDGET_VERSION = 'v3';
+const WIDGET_VERSION = 'v4';
 const WIDGET_RESOURCE_URI_BASE = `ui://taxpilot/widget-${WIDGET_VERSION}.html`;
 // Official MIME type per https://developers.openai.com/apps-sdk/build/mcp-server
 const WIDGET_MIME_TYPE = APP_WIDGET_MIME_TYPE;

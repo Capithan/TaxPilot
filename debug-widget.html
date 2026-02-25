@@ -1,19 +1,4 @@
-/**
- * MCP Apps Widget Template — ChatGPT App UI
- *
- * Returns a self-contained HTML document with inline CSS + JavaScript.
- * ChatGPT loads this via resources/read and then delivers tool data
- * to the iframe via the MCP Apps bridge (postMessage).
- *
- * Architecture (per https://developers.openai.com/apps-sdk/build/chatgpt-ui/):
- *   1. ChatGPT calls resources/read → gets this template (text/html;profile=mcp-app)
- *   2. ChatGPT sends structuredContent via ui/notifications/tool-result
- *   3. window.openai.toolOutput has the initial structuredContent
- *   4. Widget JS reads data and renders HRB-branded components
- */
-export const APP_WIDGET_MIME_TYPE = 'text/html;profile=mcp-app';
-export function getAppWidgetHtml() {
-    return `<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -259,7 +244,7 @@ function renderStepProgress(c) {
   const steps = c.steps || [];
   return '<div class="tp-steps">' + steps.map(function(s, i) {
     const cls = s.status === 'done' ? 'tp-step--done' : s.status === 'active' ? 'tp-step--active' : 'tp-step--upcoming';
-    const icon = s.status === 'done' ? (s.icon || '\\u2713') : String(i + 1);
+    const icon = s.status === 'done' ? (s.icon || '\u2713') : String(i + 1);
     const line = i < steps.length - 1
       ? '<div class="tp-step-line ' + (s.status === 'done' ? 'tp-step-line--done' : '') + '"></div>' : '';
     return '<div class="tp-step ' + cls + '"><div class="tp-step-dot">' + icon + '</div><div class="tp-step-label">' + esc(s.label) + '</div></div>' + line;
@@ -279,7 +264,6 @@ function renderStatusBadge(c) {
 }
 
 function renderFormGroup(c) {
-  var fid = 'form-' + (++_formId);
   const title = c.title ? '<div class="tp-form-title">' + esc(c.title) + '</div>' : '';
   const subtitle = c.subtitle ? '<div class="tp-form-desc">' + esc(c.subtitle) + '</div>' : '';
   const fields = (c.fields || []).map(function(f) {
@@ -288,19 +272,16 @@ function renderFormGroup(c) {
     const fType = f.fieldType || f.type || 'text';
     if (fType === 'select') {
       const opts = (f.options || []).map(function(o) { return '<option value="' + esc(o.value) + '">' + esc(o.label) + '</option>'; }).join('');
-      input = '<select class="tp-input tp-select" data-field-id="' + esc(f.id || f.label) + '"><option value="" disabled selected>' + esc(f.placeholder || 'Select...') + '</option>' + opts + '</select>';
+      input = '<select class="tp-input tp-select"><option value="" disabled selected>' + esc(f.placeholder || 'Select...') + '</option>' + opts + '</select>';
     } else if (fType === 'textarea') {
-      input = '<textarea class="tp-input tp-textarea" data-field-id="' + esc(f.id || f.label) + '" placeholder="' + esc(f.placeholder || '') + '" rows="3"></textarea>';
+      input = '<textarea class="tp-input tp-textarea" placeholder="' + esc(f.placeholder || '') + '" rows="3"></textarea>';
     } else {
-      input = '<input type="' + esc(fType) + '" class="tp-input" data-field-id="' + esc(f.id || f.label) + '" placeholder="' + esc(f.placeholder || '') + '">';
+      input = '<input type="' + esc(fType) + '" class="tp-input" placeholder="' + esc(f.placeholder || '') + '">';
     }
     const help = f.helperText ? '<div class="tp-field-help">' + esc(f.helperText) + '</div>' : '';
     return '<div class="tp-field"><label class="tp-field-label">' + esc(f.label) + required + '</label>' + input + help + '</div>';
   }).join('');
-  var footer = c.submitLabel
-    ? '<button class="tp-btn tp-btn--primary tp-btn--lg tp-btn-submit" data-form-submit="' + fid + '">' + esc(c.submitLabel) + '</button>'
-    : '<div class="tp-form-note">\\uD83D\\uDCAC Answer in the chat to continue</div>';
-  return '<div class="tp-form-group" data-form-id="' + fid + '">' + title + subtitle + '<div class="tp-form-fields">' + fields + '</div>' + footer + '</div>';
+  return '<div class="tp-form-group">' + title + subtitle + '<div class="tp-form-fields">' + fields + '</div><div class="tp-form-note">\uD83D\uDCAC Answer in the chat to continue</div></div>';
 }
 
 function renderSelectionCard(c) {
@@ -326,7 +307,7 @@ function renderMultiSelect(c) {
   }).join('');
   var submitBtn = c.submitLabel
     ? '<button class="tp-btn tp-btn--primary tp-btn--lg tp-btn-submit" data-multi-submit="' + mid + '">' + esc(c.submitLabel) + '</button>'
-    : '<button class="tp-btn tp-btn--primary tp-btn-submit" data-multi-submit="' + mid + '">Continue \u2192</button>';
+    : '<button class="tp-btn tp-btn--primary tp-btn-submit" data-multi-submit="' + mid + '">Continue →</button>';
   return '<div class="tp-multisel" data-multi-id="' + mid + '">' + title + subtitle + '<div class="tp-multisel-options">' + options + '</div>' + submitBtn + '</div>';
 }
 
@@ -366,7 +347,7 @@ function renderChecklist(c) {
   const counter = counterObj.total != null ? '<span class="tp-checklist-counter">' + (counterObj.done || 0) + '/' + counterObj.total + '</span>' : '';
   const items = (c.items || []).map(function(item) {
     const statusCls = item.status === 'collected' ? 'tp-chk--done' : item.status === 'pending' ? 'tp-chk--pending' : 'tp-chk--required';
-    const statusIcon = item.status === 'collected' ? '\\u2713' : item.status === 'pending' ? '\\u25CB' : '!';
+    const statusIcon = item.status === 'collected' ? '\u2713' : item.status === 'pending' ? '\u25CB' : '!';
     const desc = item.description ? '<div class="tp-chk-desc">' + esc(item.description) + '</div>' : '';
     return '<div class="tp-chk-item ' + statusCls + '"><div class="tp-chk-status">' + statusIcon + '</div><div class="tp-chk-body"><div class="tp-chk-text">' + esc(item.text) + '</div>' + desc + '</div></div>';
   }).join('');
@@ -375,12 +356,12 @@ function renderChecklist(c) {
 
 function renderTaxProCard(c) {
   const pro = c.taxPro || {};
-  const recommended = c.recommended ? '<div class="tp-pro-recommended">\\u2B50 Best Match</div>' : '';
+  const recommended = c.recommended ? '<div class="tp-pro-recommended">\u2B50 Best Match</div>' : '';
   const reason = c.matchReason ? '<div class="tp-pro-reason">' + esc(c.matchReason) + '</div>' : '';
   const rating = pro.rating || 0;
-  const stars = '\\u2605'.repeat(Math.floor(rating)) + (rating % 1 >= 0.5 ? '\\u00BD' : '');
+  const stars = '\u2605'.repeat(Math.floor(rating)) + (rating % 1 >= 0.5 ? '\u00BD' : '');
   const specs = (pro.specializations || []).map(function(s) { return '<span class="tp-badge tp-badge--info">' + esc(s) + '</span>'; }).join(' ');
-  const avail = pro.availability ? '<div class="tp-pro-avail">\\uD83D\\uDCC5 ' + esc(pro.availability) + '</div>' : '';
+  const avail = pro.availability ? '<div class="tp-pro-avail">\uD83D\uDCC5 ' + esc(pro.availability) + '</div>' : '';
   const initial = ((pro.name || 'T') + '').charAt(0);
   return '<div class="tp-pro-card ' + (c.recommended ? 'tp-pro-card--recommended' : '') + '">' + recommended + '<div class="tp-pro-header"><div class="tp-pro-avatar">' + initial + '</div><div class="tp-pro-info"><div class="tp-pro-name">' + esc(pro.name) + '</div><div class="tp-pro-title">' + esc(pro.title) + '</div><div class="tp-pro-rating"><span class="tp-stars">' + stars + '</span> ' + rating + '</div></div></div><div class="tp-pro-specs">' + specs + '</div>' + reason + avail + '</div>';
 }
@@ -391,17 +372,17 @@ function renderAppointmentSummary(c) {
   const client = c.client || {};
   const confId = c.confirmationId ? '<div class="tp-appt-confid">Confirmation: <strong>' + esc(c.confirmationId) + '</strong></div>' : '';
   const rating = pro.rating || 0;
-  const stars = '\\u2605'.repeat(Math.floor(rating)) + (rating % 1 >= 0.5 ? '\\u00BD' : '');
+  const stars = '\u2605'.repeat(Math.floor(rating)) + (rating % 1 >= 0.5 ? '\u00BD' : '');
   const specs = (pro.specializations || []).map(function(s) { return '<span class="tp-badge tp-badge--info">' + esc(s) + '</span>'; }).join(' ');
 
   let aptFields = '';
-  if (apt.date) aptFields += '<div class="tp-cardfield"><span class="tp-cardfield-icon">\\uD83D\\uDCC6</span><span class="tp-cardfield-label">Date</span><span class="tp-cardfield-value">' + esc(apt.date) + '</span></div>';
-  if (apt.time) aptFields += '<div class="tp-cardfield"><span class="tp-cardfield-icon">\\uD83D\\uDD50</span><span class="tp-cardfield-label">Time</span><span class="tp-cardfield-value">' + esc(apt.time) + '</span></div>';
-  if (apt.duration) aptFields += '<div class="tp-cardfield"><span class="tp-cardfield-icon">\\u23F1</span><span class="tp-cardfield-label">Duration</span><span class="tp-cardfield-value">' + esc(apt.duration) + '</span></div>';
-  if (apt.type) aptFields += '<div class="tp-cardfield"><span class="tp-cardfield-icon">' + (apt.type === 'Virtual' ? '\\uD83D\\uDCBB' : '\\uD83C\\uDFE2') + '</span><span class="tp-cardfield-label">Type</span><span class="tp-cardfield-value">' + esc(apt.type) + '</span></div>';
-  if (apt.location) aptFields += '<div class="tp-cardfield"><span class="tp-cardfield-icon">\\uD83D\\uDCCD</span><span class="tp-cardfield-label">Location</span><span class="tp-cardfield-value">' + esc(apt.location) + '</span></div>';
+  if (apt.date) aptFields += '<div class="tp-cardfield"><span class="tp-cardfield-icon">\uD83D\uDCC6</span><span class="tp-cardfield-label">Date</span><span class="tp-cardfield-value">' + esc(apt.date) + '</span></div>';
+  if (apt.time) aptFields += '<div class="tp-cardfield"><span class="tp-cardfield-icon">\uD83D\uDD50</span><span class="tp-cardfield-label">Time</span><span class="tp-cardfield-value">' + esc(apt.time) + '</span></div>';
+  if (apt.duration) aptFields += '<div class="tp-cardfield"><span class="tp-cardfield-icon">\u23F1</span><span class="tp-cardfield-label">Duration</span><span class="tp-cardfield-value">' + esc(apt.duration) + '</span></div>';
+  if (apt.type) aptFields += '<div class="tp-cardfield"><span class="tp-cardfield-icon">' + (apt.type === 'Virtual' ? '\uD83D\uDCBB' : '\uD83C\uDFE2') + '</span><span class="tp-cardfield-label">Type</span><span class="tp-cardfield-value">' + esc(apt.type) + '</span></div>';
+  if (apt.location) aptFields += '<div class="tp-cardfield"><span class="tp-cardfield-icon">\uD83D\uDCCD</span><span class="tp-cardfield-label">Location</span><span class="tp-cardfield-value">' + esc(apt.location) + '</span></div>';
 
-  return '<div class="tp-appt-summary">' + confId + '<div class="tp-appt-sections"><div class="tp-appt-section"><div class="tp-appt-section-title">\\uD83D\\uDCC5 Appointment Details</div>' + aptFields + '</div><div class="tp-appt-section"><div class="tp-appt-section-title">\\uD83D\\uDC68\\u200D\\uD83D\\uDCBC Tax Professional</div><div class="tp-appt-pro-header"><div><div class="tp-appt-pro-name">' + esc(pro.name) + '</div><div class="tp-appt-pro-title">' + esc(pro.title) + '</div><div class="tp-appt-pro-rating"><span class="tp-stars">' + stars + '</span> ' + rating + '</div></div></div><div class="tp-appt-pro-specs">' + specs + '</div></div>' + (client.name ? '<div class="tp-appt-section"><div class="tp-appt-section-title">\\uD83D\\uDC64 Client</div><div class="tp-cardfield"><span class="tp-cardfield-label">Name</span><span class="tp-cardfield-value">' + esc(client.name) + '</span></div></div>' : '') + '</div></div>';
+  return '<div class="tp-appt-summary">' + confId + '<div class="tp-appt-sections"><div class="tp-appt-section"><div class="tp-appt-section-title">\uD83D\uDCC5 Appointment Details</div>' + aptFields + '</div><div class="tp-appt-section"><div class="tp-appt-section-title">\uD83D\uDC68\u200D\uD83D\uDCBC Tax Professional</div><div class="tp-appt-pro-header"><div><div class="tp-appt-pro-name">' + esc(pro.name) + '</div><div class="tp-appt-pro-title">' + esc(pro.title) + '</div><div class="tp-appt-pro-rating"><span class="tp-stars">' + stars + '</span> ' + rating + '</div></div></div><div class="tp-appt-pro-specs">' + specs + '</div></div>' + (client.name ? '<div class="tp-appt-section"><div class="tp-appt-section-title">\uD83D\uDC64 Client</div><div class="tp-cardfield"><span class="tp-cardfield-label">Name</span><span class="tp-cardfield-value">' + esc(client.name) + '</span></div></div>' : '') + '</div></div>';
 }
 
 function renderCarousel(c) {
@@ -466,7 +447,7 @@ function renderUIResponseBody(resp) {
 
       const sections = (card.sections || []).map(function(sec) {
         const items = (sec.items || []).map(function(item) {
-          const icon = item.icon || (item.status === 'done' ? '\\u2705' : item.status === 'required' ? '\\u26A0\\uFE0F' : '\\u2022');
+          const icon = item.icon || (item.status === 'done' ? '\u2705' : item.status === 'required' ? '\u26A0\uFE0F' : '\u2022');
           const desc = item.description ? '<div class="tp-chk-desc">' + esc(item.description) + '</div>' : '';
           const statusCls = (item.status === 'collected' || item.status === 'done') ? 'tp-chk--done' : item.status === 'pending' ? 'tp-chk--pending' : '';
           return '<div class="tp-chk-item ' + statusCls + '"><div class="tp-chk-status">' + icon + '</div><div class="tp-chk-body"><div class="tp-chk-text">' + esc(item.text) + '</div>' + desc + '</div></div>';
@@ -483,7 +464,7 @@ function renderUIResponseBody(resp) {
     resp.sections.forEach(function(sec) {
       const icon = sec.icon || '';
       const items = (sec.items || []).map(function(item) {
-        const sIcon = item.icon || (item.status === 'done' ? '\\u2705' : item.status === 'required' ? '\\u26A0\\uFE0F' : '\\u2022');
+        const sIcon = item.icon || (item.status === 'done' ? '\u2705' : item.status === 'required' ? '\u26A0\uFE0F' : '\u2022');
         const desc = item.description ? '<div class="tp-chk-desc">' + esc(item.description) + '</div>' : '';
         return '<div class="tp-chk-item"><div class="tp-chk-status">' + sIcon + '</div><div class="tp-chk-body"><div class="tp-chk-text">' + esc(item.text) + '</div>' + desc + '</div></div>';
       }).join('');
@@ -500,14 +481,14 @@ function renderUIResponseBody(resp) {
     parts.push('<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">' + btns + '</div>');
   }
 
-  return parts.join('\\n');
+  return parts.join('\n');
 }
 
 // ─── Main Render Function ────────────────────────────────────────────────────
 function render(data) {
   const el = document.getElementById('content');
   if (!data || typeof data !== 'object') {
-    el.innerHTML = '<div class="tp-loading"><div class="tp-loading-icon">\\uD83D\\uDFE2</div><div class="tp-loading-text">TaxPilot — H&amp;R Block</div><div class="tp-text tp-text--caption" style="margin-top:8px">Waiting for tool results…</div></div>';
+    el.innerHTML = '<div class="tp-loading"><div class="tp-loading-icon">\uD83D\uDFE2</div><div class="tp-loading-text">TaxPilot — H&amp;R Block</div><div class="tp-text tp-text--caption" style="margin-top:8px">Waiting for tool results…</div></div>';
     return;
   }
 
@@ -515,7 +496,7 @@ function render(data) {
 
   // StructuredUIResponse (components array)
   if (data.components && Array.isArray(data.components)) {
-    html = data.components.map(renderComponent).join('\\n');
+    html = data.components.map(renderComponent).join('\n');
   }
   // UIResponse (builder format with type/title/cards)
   else if (data.type || data.title || data.cards) {
@@ -616,6 +597,4 @@ window.addEventListener('message', function(event) {
 }, { passive: true });
 </script>
 </body>
-</html>`;
-}
-//# sourceMappingURL=appWidgetHtml.js.map
+</html>
