@@ -95,7 +95,7 @@ import { formatWelcomeScreen } from './ui/formatters/welcome.js';
 
 import type { UIResponse } from './ui/types.js';
 import { toReadableText } from './ui/toReadableText.js';
-import { toHtmlWidget } from './ui/toHtmlWidget.js';
+import { getAppWidgetHtml, APP_WIDGET_MIME_TYPE } from './ui/appWidgetHtml.js';
 
 /** MCP Apps Widget resource URI */
 const WIDGET_RESOURCE_URI_BASE = 'ui://taxpilot/widget.html';
@@ -568,18 +568,18 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     ];
 
   // Inject MCP Apps UI metadata into all tools (versioned URI for fresh HTML)
-  const templateTools = new Set(['render_welcome_ui']);
+  // All tools include openai/outputTemplate so ChatGPT always renders the widget
+  // with the latest structuredContent after each tool call.
 
   const tools = rawTools.map(tool => {
+    const isRenderTool = tool.name === 'render_welcome_ui';
     const meta: Record<string, unknown> = {
       ui: { resourceUri: getWidgetResourceUri() },
       'ui/resourceUri': getWidgetResourceUri(),
-      // Only the dedicated render tool should advertise the output template.
-      // Data tools stay template-free to avoid remounting the iframe.
-      ...(templateTools.has(tool.name) ? { 'openai/outputTemplate': getWidgetResourceUri() } : {}),
-      // Friendly invocation copy for ChatGPT Apps surfaces.
-      'openai/toolInvocation/invoking': templateTools.has(tool.name) ? 'Rendering TaxPilot UI…' : 'Working…',
-      'openai/toolInvocation/invoked': templateTools.has(tool.name) ? 'Rendered TaxPilot UI.' : 'Done.',
+      'openai/outputTemplate': getWidgetResourceUri(),
+      'openai/widgetAccessible': true,
+      'openai/toolInvocation/invoking': isRenderTool ? 'Rendering TaxPilot UI…' : 'Working…',
+      'openai/toolInvocation/invoked': isRenderTool ? 'Rendered TaxPilot UI.' : 'Done.',
     };
 
     return {
@@ -596,43 +596,38 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => {
   return {
     resources: [{
       name: 'TaxPilot Widget',
+      title: 'TaxPilot — H&R Block Tax Assistant',
       uri: WIDGET_RESOURCE_URI_BASE,
-      mimeType: 'text/html;profile=mcp-app',
-      description: 'H&R Block TaxPilot interactive UI widget',
+      mimeType: APP_WIDGET_MIME_TYPE,
+      description: 'H&R Block TaxPilot interactive UI widget — renders intake forms, document checklists, tax pro cards, and appointment summaries.',
+      _meta: {
+        'openai/outputTemplate': WIDGET_RESOURCE_URI_BASE,
+        ui: { prefersBorder: true },
+      },
     }],
   };
 });
 
-// Handle resource reading (serve pre-rendered static HTML when data available)
+// Handle resource reading — always return the interactive JS widget template.
+// ChatGPT delivers structuredContent via the MCP Apps bridge (postMessage)
+// so the widget re-renders from the latest tool output automatically.
 server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
   const { uri } = request.params;
   // Accept base URI or any versioned variant (?v=N)
   if (uri.startsWith(WIDGET_RESOURCE_URI_BASE)) {
-    // If we have tool data, produce static pre-rendered HTML (no JS needed)
-    if (latestToolResult) {
-      const staticHtml = toHtmlWidget(latestToolResult);
-      if (staticHtml) {
-        return {
-          contents: [{
-            uri,
-            mimeType: 'text/html;profile=mcp-app',
-            text: staticHtml,
-          }],
-        };
-      }
-    }
-    // Fallback: return interactive widget
-    const { readFileSync } = await import('fs');
-    const { join, dirname } = await import('path');
-    const { fileURLToPath } = await import('url');
-    const thisDir = dirname(fileURLToPath(import.meta.url));
-    const widgetPath = join(thisDir, '..', 'public', 'taxpilot-widget.html');
-    const html = readFileSync(widgetPath, 'utf-8');
+    const html = getAppWidgetHtml();
     return {
       contents: [{
         uri,
-        mimeType: 'text/html;profile=mcp-app',
+        mimeType: APP_WIDGET_MIME_TYPE,
         text: html,
+        _meta: {
+          'openai/outputTemplate': WIDGET_RESOURCE_URI_BASE,
+          'openai/toolInvocation/invoking': 'Rendering TaxPilot…',
+          'openai/toolInvocation/invoked': 'TaxPilot ready',
+          'openai/widgetAccessible': true,
+          ui: { prefersBorder: true },
+        },
       }],
     };
   }

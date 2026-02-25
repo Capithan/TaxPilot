@@ -529,6 +529,7 @@ function toolMeta(invoking: string, invoked: string) {
 }
 
 const mcpTools = [
+  { name: 'render_taxpilot_ui',       title: 'Show TaxPilot UI',           description: 'Render the TaxPilot home screen widget with welcome message and action buttons. Call this at conversation start so the user sees the UI immediately.', inputSchema: { type: 'object', properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }, _meta: toolMeta('Rendering TaxPilot UI…', 'TaxPilot UI ready') },
   { name: 'start_intake',            title: 'Start Intake',              description: 'Start a new client tax intake session. Begins the guided intake process to collect all necessary information before the tax appointment.', inputSchema: { type: 'object', properties: { clientId: { type: 'string', description: 'Optional existing client ID' } }, additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, _meta: toolMeta('Starting intake session…', 'Intake session ready') },
   { name: 'process_intake_response', title: 'Answer Intake Question',    description: 'Process the client response during the intake conversation. Send the answer to continue gathering information step by step.', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, answer: { type: 'string', description: "Client's response to the current intake question" } }, required: ['sessionId', 'answer'], additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, _meta: toolMeta('Processing response…', 'Response recorded') },
   { name: 'get_intake_progress',     title: 'Get Intake Progress',       description: 'Get the current progress of an intake session including completed steps and percentage.', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'], additionalProperties: false }, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }, _meta: toolMeta('Fetching intake progress…', 'Progress loaded') },
@@ -550,6 +551,10 @@ const mcpTools = [
 function handleToolCall(name: string, args: Record<string, unknown>): { content: Array<{ type: string; text: string }>; structuredContent?: Record<string, unknown> } {
   try {
     switch (name) {
+      case 'render_taxpilot_ui': {
+        return toMcpContent(formatWelcomeScreen() as unknown as Record<string, unknown>);
+      }
+
       case 'start_intake': {
         const result = startIntakeSession(args?.clientId as string | undefined);
         return toMcpContent(formatIntakeStart(result));
@@ -708,12 +713,12 @@ function handleToolCall(name: string, args: Record<string, unknown>): { content:
   }
 }
 
-// MCP Streamable HTTP transport - handles both GET (SSE) and POST (JSON-RPC)
-// This implements the 2025-03-26 spec that ChatGPT uses
+// ── MCP Streamable HTTP transport ────────────────────────────────────────────
+// Implements the 2025-03-26 spec that ChatGPT uses.
+// Exposed at both /mcp (standard) and /sse (legacy) for backwards-compat.
 
-// POST handler for Streamable HTTP - receives JSON-RPC requests
-app.post('/sse', (req: Request, res: Response) => {
-  console.log('=== MCP POST /sse request ===');
+function handleMcpPost(req: Request, res: Response) {
+  console.log('=== MCP POST request ===');
   console.log('Content-Type:', req.headers['content-type']);
   console.log('Accept:', req.headers['accept']);
   console.log('Raw body type:', typeof req.body);
@@ -871,6 +876,7 @@ app.post('/sse', (req: Request, res: Response) => {
               uri,
               mimeType: WIDGET_MIME_TYPE,
               text: html,
+              _meta: toolMeta('Rendering TaxPilot…', 'TaxPilot ready'),
             }]
           }
         });
@@ -918,7 +924,11 @@ app.post('/sse', (req: Request, res: Response) => {
     id,
     error: { code: -32601, message: `Method not found: ${method}` }
   });
-});
+}
+
+// Mount MCP POST handler on both /mcp (ChatGPT standard) and /sse (legacy)
+app.post('/mcp', handleMcpPost);
+app.post('/sse', handleMcpPost);
 
 // GET handler for legacy SSE transport (backwards compatibility)
 app.get('/sse', (req: Request, res: Response) => {
@@ -946,6 +956,45 @@ app.get('/sse', (req: Request, res: Response) => {
   res.write(`data: ${messagesUrl}\n\n`);
   
   // Keep-alive ping every 10 seconds (more frequent for ChatGPT)
+  const pingInterval = setInterval(() => {
+    if (!res.writableEnded) {
+      res.write(`:ping ${Date.now()}\n\n`);
+    } else {
+      clearInterval(pingInterval);
+    }
+  }, 10000);
+  
+  // Cleanup on close
+  req.on('close', () => {
+    clearInterval(pingInterval);
+    sseSessions.delete(sessionId);
+    console.log(`SSE session ${sessionId} closed`);
+  });
+  
+  res.on('error', () => {
+    clearInterval(pingInterval);
+    sseSessions.delete(sessionId);
+  });
+  
+  console.log(`SSE session ${sessionId} established, messages URL: ${messagesUrl}`);
+});
+
+// Also serve SSE GET on /mcp for clients that open the endpoint
+app.get('/mcp', (req: Request, res: Response) => {
+  console.log('SSE GET connection on /mcp');
+  req.setTimeout(0);
+  res.setTimeout(0);
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.flushHeaders();
+  const sessionId = crypto.randomUUID();
+  const messagesUrl = `https://${req.get('host')}/messages?sessionId=${sessionId}`;
+  sseSessions.set(sessionId, res);
+  res.write(`event: endpoint\n`);
+  res.write(`data: ${messagesUrl}\n\n`);
   const pingInterval = setInterval(() => {
     if (!res.writableEnded) {
       res.write(`:ping ${Date.now()}\n\n`);
@@ -1090,6 +1139,7 @@ app.post('/messages', (req: Request, res: Response) => {
                 uri: readUri,
                 mimeType: WIDGET_MIME_TYPE,
                 text: html,
+                _meta: toolMeta('Rendering TaxPilot…', 'TaxPilot ready'),
               }]
             }
           };
@@ -1182,7 +1232,8 @@ app.get('/', (_req: Request, res: Response) => {
         <li><a href="/health">/health</a> - Health check</li>
         <li><a href="/openapi.yaml">/openapi.yaml</a> - OpenAPI specification</li>
         <li><a href="/privacy">/privacy</a> - Privacy policy</li>
-        <li>/sse - MCP SSE endpoint (for ChatGPT)</li>
+        <li>/mcp - MCP endpoint (for ChatGPT developer mode)</li>
+        <li>/sse - MCP SSE endpoint (legacy, same as /mcp)</li>
       </ul>
     </body>
     </html>

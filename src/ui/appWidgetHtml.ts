@@ -349,13 +349,13 @@ function renderButton(c) {
   const cls = variantCls[c.variant] || 'tp-btn--primary';
   const sizeCls = c.size === 'sm' ? 'tp-btn--sm' : c.size === 'lg' ? 'tp-btn--lg' : '';
   const icon = c.icon ? '<span class="tp-btn-icon">' + c.icon + '</span>' : '';
-  // If action has a label or tool info, make the button interactive
-  var actionMsg = '';
+  // If action is a tool_call, wire up direct tool invocation via the bridge
   if (c.action && c.action.type === 'tool_call' && c.action.tool) {
-    actionMsg = 'Call ' + c.action.tool;
-  } else if (c.label) {
-    actionMsg = c.label;
+    var params = JSON.stringify(c.action.parameters || {}).replace(/"/g, '&quot;');
+    return '<button class="tp-btn ' + cls + ' ' + sizeCls + '" data-btn-tool="' + esc(c.action.tool) + '" data-btn-params="' + params + '" data-btn-msg="Call ' + esc(c.action.tool) + '" style="border:none">' + icon + '<span>' + esc(c.label) + '</span></button>';
   }
+  // Otherwise, send a follow-up message
+  var actionMsg = c.label || '';
   if (actionMsg) {
     return '<button class="tp-btn ' + cls + ' ' + sizeCls + '" data-btn-msg="' + esc(actionMsg) + '" style="border:none">' + icon + '<span>' + esc(c.label) + '</span></button>';
   }
@@ -534,8 +534,56 @@ function render(data) {
 }
 
 // ─── Bridge Helpers ──────────────────────────────────────────────────────────
+var _rpcId = 0;
+var _rpcCallbacks = {};
+
+/** Send a JSON-RPC 2.0 request to the host and return a promise for the result */
+function rpcRequest(method, params) {
+  return new Promise(function(resolve, reject) {
+    var id = ++_rpcId;
+    _rpcCallbacks[id] = { resolve: resolve, reject: reject };
+    window.parent.postMessage({ jsonrpc: '2.0', id: id, method: method, params: params || {} }, '*');
+    // Timeout after 15 seconds
+    setTimeout(function() {
+      if (_rpcCallbacks[id]) { delete _rpcCallbacks[id]; reject(new Error('RPC timeout: ' + method)); }
+    }, 15000);
+  });
+}
+
+/** Send a follow-up message to the ChatGPT conversation */
 function sendMessage(text) {
   window.parent.postMessage({ jsonrpc: '2.0', method: 'ui/message', params: { role: 'user', content: [{ type: 'text', text: text }] } }, '*');
+}
+
+/** Call an MCP tool from the widget via the bridge */
+function callTool(toolName, args) {
+  // Try window.openai.callTool first (Apps SDK compat)
+  if (window.openai && typeof window.openai.callTool === 'function') {
+    return window.openai.callTool(toolName, args || {});
+  }
+  // Fallback to MCP Apps JSON-RPC bridge
+  return rpcRequest('tools/call', { name: toolName, arguments: args || {} });
+}
+
+/** Update model-visible context when UI state changes */
+function updateModelContext(text) {
+  rpcRequest('ui/update-model-context', { content: [{ type: 'text', text: text }] }).catch(function() {});
+}
+
+/** Request a display mode change (inline, fullscreen, pip) */
+function requestDisplayMode(mode) {
+  if (window.openai && typeof window.openai.requestDisplayMode === 'function') {
+    return window.openai.requestDisplayMode({ mode: mode });
+  }
+  return rpcRequest('ui/request-display-mode', { mode: mode });
+}
+
+/** Open an external link via the host */
+function openExternal(href) {
+  if (window.openai && typeof window.openai.openExternal === 'function') {
+    return window.openai.openExternal({ href: href });
+  }
+  window.open(href, '_blank');
 }
 
 // ─── Event Delegation (interactive forms, selections, buttons) ──────────────
@@ -586,6 +634,24 @@ document.getElementById('content').addEventListener('click', function(e) {
       }
       return;
     }
+    // Button with tool_call action — call the tool directly via bridge
+    if (t.dataset && t.dataset.btnTool) {
+      var toolName = t.dataset.btnTool;
+      var toolParams = {};
+      try { toolParams = JSON.parse(t.dataset.btnParams || '{}'); } catch(e) {}
+      t.disabled = true;
+      var origLabel = t.textContent;
+      t.textContent = 'Working\u2026';
+      callTool(toolName, toolParams).then(function(result) {
+        var data = result?.structuredContent ?? result?.result?.structuredContent ?? result;
+        if (data) { render(data); updateModelContext('User clicked: ' + toolName); }
+        t.disabled = false; t.textContent = origLabel;
+      }).catch(function() {
+        t.disabled = false; t.textContent = origLabel;
+        sendMessage(t.dataset.btnMsg || toolName);
+      });
+      return;
+    }
     // Button with message
     if (t.dataset && t.dataset.btnMsg) {
       sendMessage(t.dataset.btnMsg);
@@ -606,14 +672,29 @@ window.addEventListener('openai:set_globals', function(event) {
   if (data) render(data);
 }, { passive: true });
 
-// 3. Listen for MCP Apps bridge notifications (ui/notifications/tool-result)
+// 3. Listen for MCP Apps bridge notifications AND JSON-RPC responses
 window.addEventListener('message', function(event) {
   if (event.source !== window.parent) return;
   const message = event.data;
   if (!message || message.jsonrpc !== '2.0') return;
+
+  // JSON-RPC response (for rpcRequest callbacks)
+  if (message.id != null && _rpcCallbacks[message.id]) {
+    var cb = _rpcCallbacks[message.id];
+    delete _rpcCallbacks[message.id];
+    if (message.error) { cb.reject(message.error); }
+    else { cb.resolve(message.result); }
+    return;
+  }
+
+  // MCP Apps bridge notifications
   if (message.method === 'ui/notifications/tool-result') {
     const data = message.params?.structuredContent ?? message.params;
     if (data) render(data);
+  }
+  if (message.method === 'ui/notifications/tool-input') {
+    // Tool input received — can be used to pre-fill forms if needed
+    console.log('[TaxPilot] Tool input received:', message.params);
   }
 }, { passive: true });
 </script>
