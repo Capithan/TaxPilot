@@ -195,6 +195,24 @@ body {
 /* Form note */
 .tp-form-note { font-size: 12px; color: var(--hrb-text-muted); text-align: center; margin-top: 8px; }
 
+/* Interactive: Submit button in forms */
+.tp-btn-submit { width:100%; margin-top:4px; cursor:pointer; border:none; }
+.tp-btn-submit:hover { filter:brightness(1.1); }
+.tp-btn-submit:active { transform:scale(0.98); }
+.tp-btn-submit:disabled { opacity:0.5; cursor:wait; }
+/* Interactive: Clickable selection options */
+.tp-sopt[data-select-option] { cursor:pointer; transition:border-color 0.15s,background 0.15s; }
+.tp-sopt[data-select-option]:hover { border-color:var(--hrb-green); background:var(--hrb-green-light); }
+/* Interactive: Toggleable multi-select */
+.tp-mopt[data-multi-option] { cursor:pointer; transition:border-color 0.15s,background 0.15s; }
+.tp-mopt[data-multi-option]:hover { border-color:var(--hrb-green); }
+.tp-mopt--selected { border-color:var(--hrb-green)!important; background:var(--hrb-green-light); }
+.tp-mopt--selected .tp-mopt-check { border-color:var(--hrb-green); background:var(--hrb-green); color:#fff; }
+/* Interactive: Clickable buttons */
+.tp-btn[data-btn-msg] { cursor:pointer; opacity:1!important; pointer-events:auto!important; transition:filter 0.15s; }
+.tp-btn[data-btn-msg]:hover { filter:brightness(1.1); }
+.tp-btn[data-btn-msg]:active { transform:scale(0.98); }
+
 @keyframes confetti-pop { 0% { transform: scale(0.95); opacity: 0; } 50% { transform: scale(1.02); } 100% { transform: scale(1); opacity: 1; } }
 .tp-banner[data-confetti="true"] { animation: confetti-pop 0.5s ease-out; }
 </style>
@@ -210,6 +228,10 @@ body {
 </div>
 
 <script type="module">
+// ─── Globals ─────────────────────────────────────────────────────────────────
+var _formId = 0;
+var _multiId = 0;
+
 // ─── HTML Escape ─────────────────────────────────────────────────────────────
 function esc(text) {
   const s = String(text ?? '');
@@ -283,21 +305,25 @@ function renderSelectionCard(c) {
     const icon = opt.icon ? '<span class="tp-sopt-icon">' + opt.icon + '</span>' : '';
     const badge = opt.badge ? '<span class="tp-sopt-badge">' + esc(opt.badge) + '</span>' : '';
     const desc = opt.description ? '<div class="tp-sopt-desc">' + esc(opt.description) + '</div>' : '';
-    return '<div class="tp-sopt">' + icon + '<div class="tp-sopt-text"><div class="tp-sopt-label">' + esc(opt.label) + badge + '</div>' + desc + '</div></div>';
+    return '<div class="tp-sopt" data-select-option="' + esc(opt.label) + '">' + icon + '<div class="tp-sopt-text"><div class="tp-sopt-label">' + esc(opt.label) + badge + '</div>' + desc + '</div></div>';
   }).join('');
-  return '<div class="tp-sel">' + title + '<div class="tp-sel-options">' + options + '</div><div class="tp-form-note">\\uD83D\\uDCAC Tell me your choice in the chat</div></div>';
+  return '<div class="tp-sel">' + title + '<div class="tp-sel-options">' + options + '</div></div>';
 }
 
 function renderMultiSelect(c) {
+  var mid = 'multi-' + (++_multiId);
   const title = c.title ? '<div class="tp-multisel-title">' + esc(c.title) + '</div>' : '';
   const subtitle = c.subtitle ? '<div class="tp-multisel-sub">' + esc(c.subtitle) + '</div>' : '';
   const options = (c.options || []).map(function(opt) {
     const icon = opt.icon ? '<span class="tp-mopt-icon">' + opt.icon + '</span>' : '';
     const desc = opt.description ? '<div class="tp-mopt-desc">' + esc(opt.description) + '</div>' : '';
     const badge = opt.badge ? '<span class="tp-mopt-badge">' + esc(opt.badge) + '</span>' : '';
-    return '<div class="tp-mopt"><div class="tp-mopt-header">' + icon + '<div class="tp-mopt-text"><div class="tp-mopt-label">' + esc(opt.label) + badge + '</div>' + desc + '</div><div class="tp-mopt-check"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div></div></div>';
+    return '<div class="tp-mopt" data-multi-option="' + esc(opt.label) + '"><div class="tp-mopt-header">' + icon + '<div class="tp-mopt-text"><div class="tp-mopt-label">' + esc(opt.label) + badge + '</div>' + desc + '</div><div class="tp-mopt-check"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div></div></div>';
   }).join('');
-  return '<div class="tp-multisel">' + title + subtitle + '<div class="tp-multisel-options">' + options + '</div><div class="tp-form-note">\\uD83D\\uDCAC Tell me your selections in the chat</div></div>';
+  var submitBtn = c.submitLabel
+    ? '<button class="tp-btn tp-btn--primary tp-btn--lg tp-btn-submit" data-multi-submit="' + mid + '">' + esc(c.submitLabel) + '</button>'
+    : '<button class="tp-btn tp-btn--primary tp-btn-submit" data-multi-submit="' + mid + '">Continue \u2192</button>';
+  return '<div class="tp-multisel" data-multi-id="' + mid + '">' + title + subtitle + '<div class="tp-multisel-options">' + options + '</div>' + submitBtn + '</div>';
 }
 
 function renderInfoCard(c) {
@@ -317,6 +343,16 @@ function renderButton(c) {
   const cls = variantCls[c.variant] || 'tp-btn--primary';
   const sizeCls = c.size === 'sm' ? 'tp-btn--sm' : c.size === 'lg' ? 'tp-btn--lg' : '';
   const icon = c.icon ? '<span class="tp-btn-icon">' + c.icon + '</span>' : '';
+  // If action has a label or tool info, make the button interactive
+  var actionMsg = '';
+  if (c.action && c.action.type === 'tool_call' && c.action.tool) {
+    actionMsg = 'Call ' + c.action.tool;
+  } else if (c.label) {
+    actionMsg = c.label;
+  }
+  if (actionMsg) {
+    return '<button class="tp-btn ' + cls + ' ' + sizeCls + '" data-btn-msg="' + esc(actionMsg) + '" style="border:none">' + icon + '<span>' + esc(c.label) + '</span></button>';
+  }
   return '<span class="tp-btn ' + cls + ' ' + sizeCls + '" style="pointer-events:none;opacity:0.8">' + icon + '<span>' + esc(c.label) + '</span></span>';
 }
 
@@ -490,6 +526,68 @@ function render(data) {
     el.innerHTML = html;
   }
 }
+
+// ─── Bridge Helpers ──────────────────────────────────────────────────────────
+function sendMessage(text) {
+  window.parent.postMessage({ jsonrpc: '2.0', method: 'ui/message', params: { role: 'user', content: [{ type: 'text', text: text }] } }, '*');
+}
+
+// ─── Event Delegation (interactive forms, selections, buttons) ──────────────
+document.getElementById('content').addEventListener('click', function(e) {
+  var t = e.target;
+  while (t && t !== this) {
+    // Form submit button
+    if (t.dataset && t.dataset.formSubmit) {
+      var formEl = document.querySelector('[data-form-id="' + t.dataset.formSubmit + '"]');
+      if (formEl) {
+        var inputs = formEl.querySelectorAll('.tp-input');
+        var parts = [];
+        inputs.forEach(function(inp) {
+          var lbl = inp.closest('.tp-field');
+          var labelText = lbl ? lbl.querySelector('.tp-field-label')?.textContent?.replace('*','').trim() : '';
+          var val = inp.value?.trim();
+          if (labelText && val) parts.push(labelText + ': ' + val);
+        });
+        if (parts.length > 0) {
+          t.disabled = true; t.textContent = 'Sending…';
+          sendMessage(parts.join(', '));
+        }
+      }
+      return;
+    }
+    // Selection card option click
+    if (t.dataset && t.dataset.selectOption) {
+      sendMessage(t.dataset.selectOption);
+      return;
+    }
+    // Multi-select toggle
+    if (t.dataset && t.dataset.multiOption != null) {
+      var mopt = t.closest('[data-multi-option]') || t;
+      mopt.classList.toggle('tp-mopt--selected');
+      return;
+    }
+    // Multi-select submit
+    if (t.dataset && t.dataset.multiSubmit) {
+      var container = document.querySelector('[data-multi-id="' + t.dataset.multiSubmit + '"]');
+      if (container) {
+        var selected = container.querySelectorAll('.tp-mopt--selected');
+        var labels = [];
+        selected.forEach(function(el) { labels.push(el.dataset.multiOption || el.querySelector('.tp-mopt-label')?.textContent?.trim()); });
+        if (labels.length > 0) {
+          t.disabled = true; t.textContent = 'Sending…';
+          sendMessage(labels.join(', '));
+        }
+      }
+      return;
+    }
+    // Button with message
+    if (t.dataset && t.dataset.btnMsg) {
+      sendMessage(t.dataset.btnMsg);
+      return;
+    }
+    t = t.parentElement;
+  }
+});
 
 // ─── Data Sources ────────────────────────────────────────────────────────────
 
