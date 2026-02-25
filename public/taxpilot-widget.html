@@ -340,6 +340,34 @@ body {
   100% { transform: scale(1); opacity: 1; }
 }
 .tp-banner[data-confetti="true"] { animation: confetti-pop 0.5s ease-out; }
+
+/* ── Responsive ─────────────────────────────────────────────────── */
+
+/* Narrow containers / small phones (≤ 420px) */
+@media (max-width: 420px) {
+  #widget-root { padding: 12px 8px; }
+
+  /* Force single-column selection grids to avoid horizontal overflow */
+  .tp-sel-options { grid-template-columns: 1fr !important; }
+
+  /* Ensure carousel items don't exceed viewport width */
+  .tp-carousel-item { min-width: min(260px, 80vw); }
+
+  /* Stack action rows vertically */
+  .tp-appt-actions,
+  .tp-pro-actions { flex-direction: column; }
+
+  /* Slightly smaller heading/button sizes to fit narrow frames */
+  .tp-btn--lg { padding: 12px 20px; font-size: 0.95rem; }
+  .tp-text--heading { font-size: 16px; }
+
+  /* Prevent iOS input zoom (font-size must be ≥ 16px) */
+  .tp-input { font-size: 16px; }
+
+  /* Ensure tap targets are at least 44px tall */
+  .tp-btn { min-height: 44px; }
+  .tp-mopt, .tp-sopt { min-height: 44px; }
+}
 </style>
 </head>
 <body>
@@ -968,15 +996,19 @@ class WidgetRenderer {
     switch (action.type) {
       case 'tool_call': {
         if (!action.toolName) return;
-        try {
-          // Show loading state
-          const loadingHtml = `<div class="tp-loading">Calling ${esc(action.toolName)}...</div>`;
-          this.root.insertAdjacentHTML('beforeend', loadingHtml);
 
+        // Use a real DOM element so we can reliably remove it in every code path
+        const loadingEl = document.createElement('div');
+        loadingEl.className = 'tp-loading';
+        loadingEl.textContent = `Calling ${action.toolName}\u2026`;
+        this.root.appendChild(loadingEl);
+
+        try {
           const result = await this.bridge.callTool(action.toolName, action.toolArgs || {});
 
-          // The result's structuredContent will come through tool-result notification
-          // But if we get it directly, render it
+          // renderResponse / renderUIResponse both set this.root.innerHTML which
+          // removes the loading element automatically.  Only explicitly remove it
+          // on the paths where no render call occurs.
           if (result && result.structuredContent) {
             this.renderResponse(result.structuredContent);
           } else if (result && result.content) {
@@ -989,11 +1021,23 @@ class WidgetRenderer {
               } catch {
                 this.root.innerHTML = `<div class="tp-text tp-text--body">${esc(textContent.text)}</div>`;
               }
+            } else {
+              // content array present but no text item — remove loading indicator
+              loadingEl.remove();
             }
+          } else {
+            // No renderable result (tool result will arrive via notification) — remove indicator
+            loadingEl.remove();
           }
         } catch (err) {
           console.error('[Widget] Tool call failed:', err);
-          this.root.querySelector('.tp-loading')?.remove();
+          loadingEl.remove();
+          this.root.insertAdjacentHTML('beforeend',
+            `<div class="tp-banner tp-banner--error">
+              <span class="tp-banner-icon">⚠️</span>
+              <span class="tp-banner-text">Failed to call ${esc(action.toolName)}: ${esc(err instanceof Error ? err.message : String(err))}</span>
+            </div>`
+          );
         }
         break;
       }

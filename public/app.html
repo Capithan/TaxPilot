@@ -489,8 +489,49 @@
     @keyframes spin { to { transform: rotate(360deg); } }
 
     /* ── Responsive ───────────────────────────────────── */
+
+    /* Dynamic viewport height — prevents layout cut-off by mobile browser chrome */
+    body { height: 100dvh; }
+
     @media (max-width: 768px) {
       .sidebar { display: none; }
+
+      /* Feed padding reduced on tablets */
+      .feed { padding: 16px; }
+
+      /* Input bar comfortable on mid-size screens */
+      .input-bar { padding: 12px 16px; }
+    }
+
+    /* Small phones (≤ 480px) */
+    @media (max-width: 480px) {
+      .topbar { padding: 10px 14px; }
+      .topbar h2 { font-size: 0.9rem; }
+
+      .feed { padding: 10px 10px; }
+
+      /* Stack send button below input on narrow screens */
+      .input-bar { padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px)); }
+      .input-row { flex-direction: column; gap: 6px; }
+      .input-row input { width: 100%; font-size: 16px; } /* 16px prevents iOS zoom */
+      .input-row button { width: 100%; padding: 12px; font-size: 0.9rem; border-radius: var(--radius); }
+
+      /* Welcome screen compact */
+      .welcome { padding: 32px 12px 20px; }
+      .welcome h2 { font-size: 1.2rem; }
+      .welcome-actions { flex-direction: column; align-items: stretch; }
+      .welcome-actions button { width: 100%; }
+
+      /* UI card fields — stack label/value vertically instead of side-by-side */
+      .ui-field { flex-direction: column; align-items: flex-start; gap: 2px; }
+      .ui-field-value { text-align: left; max-width: 100%; }
+
+      /* Action buttons wrap and shrink gracefully */
+      .ui-actions { gap: 6px; }
+      .ui-action-btn { font-size: 0.8rem; padding: 7px 12px; }
+
+      /* Card sections scroll if overflowing */
+      .ui-card-body { overflow-x: auto; -webkit-overflow-scrolling: touch; }
     }
   </style>
 </head>

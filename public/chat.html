@@ -1261,21 +1261,73 @@
     }
 
     /* ── Responsive ──────────────────────────────────────── */
+
+    /* Use dynamic viewport height where supported to account for mobile
+       browser chrome (address bar, nav bar, on-screen keyboard). */
+    body {
+      height: 100dvh; /* overrides the 100vh set above in browsers that support dvh */
+    }
+
     @media (max-width: 640px) {
       header { padding: 0 14px; }
       .starters { grid-template-columns: 1fr; }
       .message { gap: 10px; }
+      .message-content { word-break: break-word; overflow-wrap: break-word; }
       .chat-container { padding: 16px 12px; }
       .logo-text .app-sub { display: none; }
-      .flow-stages { padding: 10px 12px; gap: 0; }
+
+      /* Allow horizontal scroll so the 7-stage indicator never clips or wraps */
+      .flow-stages {
+        overflow-x: auto;
+        justify-content: flex-start;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        padding: 10px 12px;
+        gap: 0;
+      }
+      .flow-stages::-webkit-scrollbar { display: none; }
       .flow-stage-line { width: 12px; }
       .flow-stage-dot { width: 22px; height: 22px; font-size: 10px; }
+
+      /* Respect iPhone notch / home indicator at bottom */
+      .input-area {
+        padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+      }
 
       .tp-sel-options { grid-template-columns: 1fr; }
       .tp-steps { flex-wrap: wrap; }
       .tp-carousel-nav { display: none; }
+      /* Carousel items should not overflow viewport */
+      .tp-carousel-item { min-width: min(260px, 78vw); }
       .tp-appt-summary { border-width: 1.5px; }
       .tp-pro-card { min-width: 220px; }
+      /* Appointment action row wraps properly */
+      .tp-appt-actions { flex-direction: column; }
+    }
+
+    /* Extra-small phones (≤ 480px) */
+    @media (max-width: 480px) {
+      /* Hide status pill to free header space */
+      .header-right .status-pill { display: none; }
+
+      .message { gap: 8px; }
+      .message-avatar { width: 28px; height: 28px; border-radius: 8px; }
+
+      .chat-container { padding: 12px 8px; }
+
+      /* Prevent iOS from auto-zooming when tapping the textarea */
+      #messageInput { font-size: 16px; }
+
+      .input-area { padding: 12px 12px calc(12px + env(safe-area-inset-bottom, 0px)); }
+
+      /* Form inputs & buttons hit minimum 44px tap targets on touch */
+      .tp-btn { min-height: 44px; padding: 10px 14px; font-size: 0.88rem; }
+      .tp-input { min-height: 44px; font-size: 16px; } /* 16px also prevents iOS zoom */
+      .tp-sopt { padding: 12px; }
+      .tp-mopt { padding: 10px 12px; }
+
+      /* Stack appointment/pro action buttons vertically */
+      .tp-pro-actions { flex-direction: column; }
     }
 
     /* ── Accessibility: Focus Visible ─────────────────── */
@@ -1629,22 +1681,27 @@
         document.getElementById('messageInput').value = action.text || '';
         sendMessage();
         break;
-      case 'tool_call':
-        // Send as a structured command to the backend
-        var msg = '[tool:' + action.tool + '] ' + JSON.stringify(action.parameters || {});
-        document.getElementById('messageInput').value = msg;
+      case 'tool_call': {
+        // Fix: use toolName (primary field) with tool as legacy fallback.
+        // Also merge both parameters and toolArgs so either schema works.
+        var toolName = action.toolName || action.tool || '';
+        var toolParams = Object.assign({}, action.parameters || {}, action.toolArgs || {});
+        document.getElementById('messageInput').value = '[tool:' + toolName + '] ' + JSON.stringify(toolParams);
         sendMessage();
         break;
+      }
       case 'navigate':
         sessionState.update({ screen: action.screen });
-        var stage = SCREEN_TO_STAGE[action.screen];
-        if (stage) updateFlowStage(stage);
+        var navStage = SCREEN_TO_STAGE[action.screen];
+        if (navStage) updateFlowStage(navStage);
         break;
-      case 'submit_form':
-        var msg = '[form] ' + JSON.stringify(action.formData || {});
-        document.getElementById('messageInput').value = msg;
+      case 'submit_form': {
+        // Include toolName hint if present so the AI knows which tool to call
+        var formToolHint = action.toolName ? '[tool:' + action.toolName + '] ' : '[form] ';
+        document.getElementById('messageInput').value = formToolHint + JSON.stringify(action.formData || {});
         sendMessage();
         break;
+      }
     }
   }
 
