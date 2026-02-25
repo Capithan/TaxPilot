@@ -221,9 +221,58 @@ class TaxPilotRenderer {
       case 'textarea':
         input = `<textarea id="${id}" data-field-id="${esc(c.id)}" class="tp-input tp-textarea" placeholder="${esc(c.placeholder || '')}" rows="${c.rows || 3}" ${required}></textarea>`;
         break;
-      case 'date':
-        input = `<input type="date" id="${id}" data-field-id="${esc(c.id)}" class="tp-input" ${required}>`;
+      case 'date': {
+        // Use three <select> dropdowns — works reliably on every mobile browser.
+        // A hidden <input> carries the combined YYYY-MM-DD value for the DOM-flush
+        // path that the form submit handler uses.
+        const monId = this._uid('dmon');
+        const dayId = this._uid('dday');
+        const yrId  = this._uid('dyr');
+        const monthNames = ['January','February','March','April','May','June',
+                            'July','August','September','October','November','December'];
+        const monthOpts = monthNames.map((m, i) =>
+          `<option value="${String(i + 1).padStart(2, '0')}">${m}</option>`
+        ).join('');
+        const dayOpts = Array.from({ length: 31 }, (_, i) =>
+          `<option value="${String(i + 1).padStart(2, '0')}">${i + 1}</option>`
+        ).join('');
+        const curYear = new Date().getFullYear();
+        const yearOpts = Array.from({ length: 101 }, (_, i) => curYear - 16 - i)
+          .map(y => `<option value="${y}">${y}</option>`).join('');
+        input =
+          `<div class="tp-date-selects">` +
+          `<input type="hidden" id="${id}" data-field-id="${esc(c.id)}" value="">` +
+          `<select id="${monId}" class="tp-input tp-select tp-date-sel" aria-label="Month">` +
+            `<option value="" disabled selected>Month</option>${monthOpts}` +
+          `</select>` +
+          `<select id="${dayId}" class="tp-input tp-select tp-date-sel" aria-label="Day">` +
+            `<option value="" disabled selected>Day</option>${dayOpts}` +
+          `</select>` +
+          `<select id="${yrId}" class="tp-input tp-select tp-date-sel" aria-label="Year">` +
+            `<option value="" disabled selected>Year</option>${yearOpts}` +
+          `</select>` +
+          `</div>`;
+        // Bind: combine the three selects into a single YYYY-MM-DD string
+        this._pendingBinds.push(el => {
+          const hidden = el.querySelector(`#${id}`);
+          const mon    = el.querySelector(`#${monId}`);
+          const day    = el.querySelector(`#${dayId}`);
+          const yr     = el.querySelector(`#${yrId}`);
+          const combine = () => {
+            const m = mon ? mon.value : '', d = day ? day.value : '', y = yr ? yr.value : '';
+            const val = (m && d && y) ? `${y}-${m}-${d}` : '';
+            if (hidden) hidden.value = val;
+            this.state.setFormValue(gid, c.id, val);
+          };
+          [mon, day, yr].forEach(sel => {
+            if (sel) {
+              sel.addEventListener('change', combine);
+              sel.addEventListener('input', combine);
+            }
+          });
+        });
         break;
+      }
       case 'email':
         input = `<input type="email" id="${id}" data-field-id="${esc(c.id)}" class="tp-input" placeholder="${esc(c.placeholder || '')}" ${required}>`;
         break;
@@ -276,7 +325,10 @@ class TaxPilotRenderer {
         });
         const values = this.state.getFormValues(gid);
 
-        // Immediately disable button + show loading to prevent double-submit
+        // Disable button + show loading; store original label so it can be
+        // restored by the error handler in chat.html if the REST call fails.
+        btn.setAttribute('data-original-label', btn.textContent.trim());
+        btn.setAttribute('data-form-pending', 'true');
         btn.disabled = true;
         btn.innerHTML = '<span class="tp-btn-spinner"></span> Sending…';
 
@@ -348,7 +400,9 @@ class TaxPilotRenderer {
         const selected = this.state.getSelections(gid);
         if (c.minSelect && selected.length < c.minSelect) return;
 
-        // Disable button + show loading state immediately
+        // Disable button + show loading; store original label for error restore
+        btn.setAttribute('data-original-label', btn.textContent.trim());
+        btn.setAttribute('data-form-pending', 'true');
         btn.disabled = true;
         btn.innerHTML = '<span class="tp-btn-spinner"></span> Sending…';
 

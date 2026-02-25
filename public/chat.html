@@ -685,6 +685,9 @@
     .tp-input::placeholder { color: var(--text-muted); }
     .tp-select { cursor: pointer; }
     .tp-textarea { resize: vertical; min-height: 60px; }
+    /* Date-of-birth 3-select layout */
+    .tp-date-selects { display: flex; gap: 6px; }
+    .tp-date-sel { flex: 1; min-width: 0; }
     .tp-field-help {
       font-size: 0.78rem;
       color: var(--text-muted);
@@ -1713,7 +1716,15 @@
             }
           } catch (err) {
             removeTypingIndicator();
-            addMessage('assistant', '\u26A0\uFE0F Tool call failed: ' + err.message);
+            // Re-enable any form/multi-select submit buttons that were waiting for this
+            // call — so the user can correct their input and try again.
+            document.querySelectorAll('[data-form-pending="true"]').forEach(function(b) {
+              b.disabled = false;
+              b.textContent = b.getAttribute('data-original-label') || 'Continue \u2192';
+              b.removeAttribute('data-form-pending');
+              b.removeAttribute('data-original-label');
+            });
+            addMessage('assistant', '\u26A0\uFE0F Submission failed: ' + err.message + '. Please try again.');
           } finally {
             setLoading(false);
           }

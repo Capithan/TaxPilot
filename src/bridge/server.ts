@@ -557,6 +557,31 @@ function handleToolCall(name: string, args: Record<string, unknown>): { content:
           result = processIntakeResponse(sid, args.answer as string);
         }
 
+        // Surface errors immediately (e.g. session/client not found) instead of
+        // silently falling through and re-rendering the wrong intake step.
+        if (!result.success) {
+          const errUI: Record<string, unknown> = {
+            id: `err-${Date.now()}`,
+            screen: 'error',
+            components: [
+              {
+                type: 'banner',
+                text: `\u26A0\uFE0F ${result.message ?? 'Your session has expired. Please start a new intake.'}`,
+                variant: 'error',
+                icon: '\u26A0\uFE0F',
+              },
+              {
+                type: 'button',
+                label: '\uD83D\uDD04 Start New Intake',
+                variant: 'primary',
+                action: { type: 'tool_call', tool: 'start_intake', parameters: {} },
+              },
+            ],
+            _meta: { toolName: 'process_intake_response', timestamp: new Date().toISOString() },
+          };
+          return toMcpContent(errUI);
+        }
+
         const intakeProgress = getIntakeProgress(sid);
         return toMcpContent(formatIntakeResponse(result, sid, intakeProgress ? {
           completedSteps: intakeProgress.completedSteps,

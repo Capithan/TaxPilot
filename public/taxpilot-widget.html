@@ -90,6 +90,8 @@ body {
 }
 .tp-input:focus { outline: none; border-color: var(--hrb-green); box-shadow: 0 0 0 3px rgba(0,161,58,0.15); }
 .tp-field-help { font-size: 12px; color: var(--hrb-text-muted); }
+.tp-date-selects { display: flex; gap: 6px; }
+.tp-date-sel { flex: 1; min-width: 0; }
 
 /* ── Form Group ─────────────────────────────────────────────────── */
 .tp-form-group {
@@ -656,25 +658,27 @@ class WidgetRenderer {
 
   // ─── Component dispatcher ──────────────────────────────────────
   _renderComponent(c) {
-    if (!c || !c.component) return '';
-    switch (c.component) {
-      case 'Button':              return this._renderButton(c);
-      case 'FormField':           return this._renderFormField(c);
-      case 'FormGroup':           return this._renderFormGroup(c);
-      case 'MultiSelectCard':     return this._renderMultiSelect(c);
-      case 'SelectionCard':       return this._renderSelectionCard(c);
-      case 'StatusBadge':         return this._renderStatusBadge(c);
-      case 'StepProgress':        return this._renderStepProgress(c);
-      case 'ProgressBar':         return this._renderProgressBar(c);
-      case 'InfoCard':            return this._renderInfoCard(c);
-      case 'AppointmentSummaryCard': return this._renderAppointmentSummary(c);
-      case 'TaxProCard':          return this._renderTaxProCard(c);
-      case 'Checklist':           return this._renderChecklist(c);
-      case 'Banner':              return this._renderBanner(c);
-      case 'Divider':             return this._renderDivider(c);
-      case 'TextBlock':           return this._renderTextBlock(c);
-      case 'Carousel':            return this._renderCarousel(c);
-      default: return `<!-- unknown: ${c.component} -->`;
+    if (!c) return '';
+    // Accept MCP Apps SDK PascalCase (c.component) OR formatter snake_case (c.type)
+    const key = c.component || c.type || '';
+    switch (key) {
+      case 'Button':      case 'button':                           return this._renderButton(c);
+      case 'FormField':   case 'form_field':                       return this._renderFormField(c);
+      case 'FormGroup':   case 'form_group':                       return this._renderFormGroup(c);
+      case 'MultiSelectCard':    case 'multi_select':              return this._renderMultiSelect(c);
+      case 'SelectionCard':      case 'selection_card':            return this._renderSelectionCard(c);
+      case 'StatusBadge':        case 'status_badge':              return this._renderStatusBadge(c);
+      case 'StepProgress':       case 'step_progress':             return this._renderStepProgress(c);
+      case 'ProgressBar':        case 'progress_bar':              return this._renderProgressBar(c);
+      case 'InfoCard':           case 'info_card':                 return this._renderInfoCard(c);
+      case 'AppointmentSummaryCard': case 'appointment_summary':   return this._renderAppointmentSummary(c);
+      case 'TaxProCard':         case 'tax_pro_card':              return this._renderTaxProCard(c);
+      case 'Checklist':          case 'checklist':                 return this._renderChecklist(c);
+      case 'Banner':             case 'banner':                    return this._renderBanner(c);
+      case 'Divider':            case 'divider':                   return this._renderDivider(c);
+      case 'TextBlock':          case 'text_block':                return this._renderTextBlock(c);
+      case 'Carousel':           case 'carousel':                  return this._renderCarousel(c);
+      default: return `<!-- unknown: ${key} -->`;
     }
   }
 
@@ -705,37 +709,84 @@ class WidgetRenderer {
     const requiredMark = c.required ? '<span class="tp-required">*</span>' : '';
     let input = '';
 
-    switch (c.type) {
+    // Switch on c.fieldType (formatter) falling back to c.type (legacy)
+    const fieldType = c.fieldType || c.type;
+    switch (fieldType) {
       case 'select':
-        input = `<select id="${id}" class="tp-input tp-select" ${required}>
+        input = `<select id="${id}" data-field-id="${esc(c.id)}" class="tp-input tp-select" ${required}>
           <option value="" disabled selected>${esc(c.placeholder || 'Select...')}</option>
           ${(c.options || []).map(o => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('')}
         </select>`;
         break;
       case 'textarea':
-        input = `<textarea id="${id}" class="tp-input tp-textarea" placeholder="${esc(c.placeholder || '')}" rows="3" ${required}></textarea>`;
+        input = `<textarea id="${id}" data-field-id="${esc(c.id)}" class="tp-input tp-textarea" placeholder="${esc(c.placeholder || '')}" rows="3" ${required}></textarea>`;
         break;
-      case 'date':
-        input = `<input type="date" id="${id}" class="tp-input" ${required}>`;
+      case 'date': {
+        // 3-select date picker — works on every mobile browser
+        const monId = this._uid('dmon');
+        const dayId = this._uid('dday');
+        const yrId  = this._uid('dyr');
+        const monthNames = ['January','February','March','April','May','June',
+                            'July','August','September','October','November','December'];
+        const monthOpts = monthNames.map((m, i) =>
+          `<option value="${String(i + 1).padStart(2, '0')}">${m}</option>`).join('');
+        const dayOpts = Array.from({ length: 31 }, (_, i) =>
+          `<option value="${String(i + 1).padStart(2, '0')}">${i + 1}</option>`).join('');
+        const curYear = new Date().getFullYear();
+        const yearOpts = Array.from({ length: 101 }, (_, i) => curYear - 16 - i)
+          .map(y => `<option value="${y}">${y}</option>`).join('');
+        input =
+          `<div class="tp-date-selects">` +
+          `<input type="hidden" id="${id}" data-field-id="${esc(c.id)}" value="">` +
+          `<select id="${monId}" class="tp-input tp-select tp-date-sel" aria-label="Month">` +
+            `<option value="" disabled selected>Month</option>${monthOpts}` +
+          `</select>` +
+          `<select id="${dayId}" class="tp-input tp-select tp-date-sel" aria-label="Day">` +
+            `<option value="" disabled selected>Day</option>${dayOpts}` +
+          `</select>` +
+          `<select id="${yrId}" class="tp-input tp-select tp-date-sel" aria-label="Year">` +
+            `<option value="" disabled selected>Year</option>${yearOpts}` +
+          `</select>` +
+          `</div>`;
+        this._bindings.push(el => {
+          const hidden = el.querySelector(`#${id}`);
+          const mon    = el.querySelector(`#${monId}`);
+          const day    = el.querySelector(`#${dayId}`);
+          const yr     = el.querySelector(`#${yrId}`);
+          const combine = () => {
+            const m = mon ? mon.value : '', d = day ? day.value : '', y = yr ? yr.value : '';
+            const val = (m && d && y) ? `${y}-${m}-${d}` : '';
+            if (hidden) hidden.value = val;
+            this.state.setFormValue(gid, c.id, val);
+          };
+          [mon, day, yr].forEach(sel => {
+            if (sel) { sel.addEventListener('change', combine); sel.addEventListener('input', combine); }
+          });
+        });
         break;
+      }
       case 'email':
-        input = `<input type="email" id="${id}" class="tp-input" placeholder="${esc(c.placeholder || '')}" ${required}>`;
+        input = `<input type="email" id="${id}" data-field-id="${esc(c.id)}" class="tp-input" placeholder="${esc(c.placeholder || '')}" ${required}>`;
         break;
       case 'phone':
-        input = `<input type="tel" id="${id}" class="tp-input" placeholder="${esc(c.placeholder || '')}" ${required}>`;
+        input = `<input type="tel" id="${id}" data-field-id="${esc(c.id)}" class="tp-input" placeholder="${esc(c.placeholder || '')}" ${required}>`;
         break;
       case 'number':
-        input = `<input type="number" id="${id}" class="tp-input" placeholder="${esc(c.placeholder || '')}" ${required}>`;
+        input = `<input type="number" id="${id}" data-field-id="${esc(c.id)}" class="tp-input" placeholder="${esc(c.placeholder || '')}" ${required}>`;
         break;
       default:
-        input = `<input type="text" id="${id}" class="tp-input" placeholder="${esc(c.placeholder || '')}" ${required}>`;
+        input = `<input type="text" id="${id}" data-field-id="${esc(c.id)}" class="tp-input" placeholder="${esc(c.placeholder || '')}" ${required}>`;
     }
 
     const helpText = c.helperText ? `<div class="tp-field-help">${esc(c.helperText)}</div>` : '';
 
     this._bindings.push(el => {
       const inp = el.querySelector(`#${id}`);
-      if (inp) inp.addEventListener('change', () => this.state.setFormValue(gid, c.id, inp.value));
+      if (inp) {
+        const update = () => this.state.setFormValue(gid, c.id, inp.value);
+        inp.addEventListener('input', update);
+        inp.addEventListener('change', update);
+      }
     });
 
     return `<div class="tp-field"><label class="tp-field-label" for="${id}">${esc(c.label)}${requiredMark}</label>${input}${helpText}</div>`;
@@ -1051,12 +1102,19 @@ class WidgetRenderer {
             loadingEl.remove();
           }
         } catch (err) {
+          // Re-enable pending submit buttons so the user can retry
+          this.root.querySelectorAll('[data-form-pending="true"]').forEach(b => {
+            b.disabled = false;
+            b.textContent = b.getAttribute('data-original-label') || 'Continue';
+            b.removeAttribute('data-form-pending');
+            b.removeAttribute('data-original-label');
+          });
           console.error('[Widget] Tool call failed:', err);
           loadingEl.remove();
           this.root.insertAdjacentHTML('beforeend',
             `<div class="tp-banner tp-banner--error">
               <span class="tp-banner-icon">⚠️</span>
-              <span class="tp-banner-text">Failed to call ${esc(action.toolName)}: ${esc(err instanceof Error ? err.message : String(err))}</span>
+              <span class="tp-banner-text">Failed to call ${esc(toolName)}: ${esc(err instanceof Error ? err.message : String(err))}</span>
             </div>`
           );
         }
