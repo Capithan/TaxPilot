@@ -371,7 +371,18 @@ app.post('/api/tools/call', (req, res) => {
         return res.status(400).json({ error: 'Missing tool name' });
     }
     const result = handleToolCall(name, args || {});
-    // The first content block is the JSON-stringified UIResponse
+    // If the tool produced a StructuredUIResponse (interactive form/card components),
+    // return it directly so the chat.html renderer can display it without an LLM round-trip.
+    // We spread the structuredContent at the top level for backward compat with app.html
+    // (which reads fields like .title, .cards) AND add it as a named field for chat.html.
+    if (result.structuredContent) {
+        return res.json({
+            ...result.structuredContent,
+            structuredContent: result.structuredContent,
+            _text: result.content[0]?.text || '',
+        });
+    }
+    // Fallback: try to parse the text content as JSON (legacy UIResponse format)
     try {
         const uiResponse = JSON.parse(result.content[0].text);
         return res.json(uiResponse);

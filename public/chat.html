@@ -1681,25 +1681,63 @@
         document.getElementById('messageInput').value = action.text || '';
         sendMessage();
         break;
+
       case 'tool_call': {
-        // Fix: use toolName (primary field) with tool as legacy fallback.
-        // Also merge both parameters and toolArgs so either schema works.
+        // Use toolName (ui-renderer schema) or legacy tool (intake formatter schema).
+        // Bypass the LLM entirely — form/button submissions are deterministic tool
+        // calls; routing them through GPT is slower and unreliable on every request.
         var toolName = action.toolName || action.tool || '';
         var toolParams = Object.assign({}, action.parameters || {}, action.toolArgs || {});
-        document.getElementById('messageInput').value = '[tool:' + toolName + '] ' + JSON.stringify(toolParams);
-        sendMessage();
+        if (!toolName) break;
+
+        addTypingIndicator();
+        setLoading(true);
+        ;(async function callToolDirectly() {
+          try {
+            var resp = await fetch('/api/tools/call', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: toolName, args: toolParams }),
+            });
+            removeTypingIndicator();
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            var data = await resp.json();
+            // Prefer StructuredUIResponse (interactive components) over plain text
+            var structUi = data.structuredContent || (Array.isArray(data.components) ? data : null);
+            if (structUi && Array.isArray(structUi.components)) {
+              addStructuredMessage(structUi);
+            } else if (data.raw) {
+              addMessage('assistant', data.raw);
+            } else if (typeof data === 'object') {
+              addMessage('assistant', JSON.stringify(data, null, 2));
+            }
+          } catch (err) {
+            removeTypingIndicator();
+            addMessage('assistant', '\u26A0\uFE0F Tool call failed: ' + err.message);
+          } finally {
+            setLoading(false);
+          }
+        })();
         break;
       }
+
       case 'navigate':
         sessionState.update({ screen: action.screen });
         var navStage = SCREEN_TO_STAGE[action.screen];
         if (navStage) updateFlowStage(navStage);
         break;
+
       case 'submit_form': {
-        // Include toolName hint if present so the AI knows which tool to call
-        var formToolHint = action.toolName ? '[tool:' + action.toolName + '] ' : '[form] ';
-        document.getElementById('messageInput').value = formToolHint + JSON.stringify(action.formData || {});
-        sendMessage();
+        // If the form action carries a toolName, delegate to tool_call path (direct REST).
+        // Otherwise fall back to sending form data as a chat message.
+        var ftoolName = action.toolName || action.tool || '';
+        if (ftoolName) {
+          var fparams = Object.assign({}, action.parameters || {}, action.toolArgs || {}, action.formData || {});
+          handleUIAction({ type: 'tool_call', toolName: ftoolName, parameters: fparams });
+        } else {
+          document.getElementById('messageInput').value = '[form] ' + JSON.stringify(action.formData || {});
+          sendMessage();
+        }
         break;
       }
     }

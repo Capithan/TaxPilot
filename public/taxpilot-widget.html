@@ -754,10 +754,18 @@ class WidgetRenderer {
       const btn = el.querySelector(`#${submitId}`);
       if (btn) btn.addEventListener('click', () => {
         const values = this.state.getFormValues(gid);
-        if (c.submitAction) {
-          const action = { ...c.submitAction };
+
+        // Support submitAction (component types schema) OR action (intake formatter schema)
+        const submitDef = c.submitAction || c.action;
+        if (submitDef) {
+          // Disable button immediately to prevent double-submit
+          btn.disabled = true;
+          btn.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,0.4);border-top-color:#fff;border-radius:50%;animation:tpSpin 0.6s linear infinite;vertical-align:middle;margin-right:6px"></span>Sending\u2026';
+
+          const action = { ...submitDef };
           if (action.type === 'tool_call') {
-            action.toolArgs = { ...(action.toolArgs || {}), ...values };
+            // Normalise: toolArgs covers both schemas; merge form values
+            action.toolArgs = { ...(action.toolArgs || action.parameters || {}), ...values };
           } else if (action.type === 'submit_form') {
             action.formData = values;
           }
@@ -807,10 +815,18 @@ class WidgetRenderer {
       if (btn) btn.addEventListener('click', () => {
         const selected = this.state.getSelections(gid);
         if (c.minSelect && selected.length < c.minSelect) return;
-        if (c.submitAction) {
-          const action = { ...c.submitAction };
+
+        // Support submitAction (component types schema) OR action (intake formatter schema)
+        const submitDef = c.submitAction || c.action;
+        if (submitDef) {
+          // Disable button immediately
+          btn.disabled = true;
+          btn.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,0.4);border-top-color:#fff;border-radius:50%;animation:tpSpin 0.6s linear infinite;vertical-align:middle;margin-right:6px"></span>Sending\u2026';
+
+          const action = { ...submitDef };
           if (action.type === 'tool_call') {
-            action.toolArgs = { ...(action.toolArgs || {}), selections: selected };
+            // Normalise: toolArgs covers both schemas; merge selections
+            action.toolArgs = { ...(action.toolArgs || action.parameters || {}), selections: selected };
           }
           this._handleAction(action);
         }
@@ -995,16 +1011,21 @@ class WidgetRenderer {
 
     switch (action.type) {
       case 'tool_call': {
-        if (!action.toolName) return;
+        // Support both field name schemas:
+        //   toolName / toolArgs  — component types (FormGroupComponent.submitAction)
+        //   tool     / parameters — intake formatter (toolCallAction helper)
+        const toolName = action.toolName || action.tool;
+        const toolArgs = action.toolArgs || action.parameters || {};
+        if (!toolName) return;
 
         // Use a real DOM element so we can reliably remove it in every code path
         const loadingEl = document.createElement('div');
         loadingEl.className = 'tp-loading';
-        loadingEl.textContent = `Calling ${action.toolName}\u2026`;
+        loadingEl.textContent = `Calling ${toolName}\u2026`;
         this.root.appendChild(loadingEl);
 
         try {
-          const result = await this.bridge.callTool(action.toolName, action.toolArgs || {});
+          const result = await this.bridge.callTool(toolName, toolArgs);
 
           // renderResponse / renderUIResponse both set this.root.innerHTML which
           // removes the loading element automatically.  Only explicitly remove it
@@ -1129,14 +1150,31 @@ function esc(text) {
     if (window.openai && typeof window.openai.callTool === 'function') {
       try {
         const result = await window.openai.callTool(name, args);
-        // result may be { structuredContent, content } or the payload directly
         return result;
       } catch (e) {
-        console.warn('[Widget] window.openai.callTool failed, falling back to bridge:', e);
+        console.warn('[Widget] window.openai.callTool failed, falling back:', e);
       }
     }
-    // 2. MCP Apps postMessage bridge
-    return origCallTool(name, args);
+
+    // 2. MCP Apps postMessage bridge — only when the bridge successfully connected
+    if (bridge._initialized) {
+      return origCallTool(name, args);
+    }
+
+    // 3. Standalone / local-dev fallback — call the REST API directly.
+    //    Without this, the postMessage would time out after 30 s with no parent window.
+    const serverUrl = window.__TAXPILOT_SERVER__ || '';
+    const resp = await fetch(`${serverUrl}/api/tools/call`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, args }),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    // Normalise the response so existing renderer code works regardless of format
+    if (data.structuredContent) return { structuredContent: data.structuredContent };
+    if (Array.isArray(data.components)) return { structuredContent: data };
+    return { content: [{ type: 'text', text: typeof data.raw === 'string' ? data.raw : JSON.stringify(data) }] };
   };
 
   // ── Helper: render from any structuredContent / UIResponse payload ─

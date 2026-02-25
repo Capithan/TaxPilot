@@ -213,37 +213,41 @@ class TaxPilotRenderer {
 
     switch (c.fieldType) {
       case 'select':
-        input = `<select id="${id}" class="tp-input tp-select" ${required}>
+        input = `<select id="${id}" data-field-id="${esc(c.id)}" class="tp-input tp-select" ${required}>
           <option value="" disabled selected>${esc(c.placeholder || 'Select...')}</option>
           ${(c.options || []).map(o => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('')}
         </select>`;
         break;
       case 'textarea':
-        input = `<textarea id="${id}" class="tp-input tp-textarea" placeholder="${esc(c.placeholder || '')}" rows="${c.rows || 3}" ${required}></textarea>`;
+        input = `<textarea id="${id}" data-field-id="${esc(c.id)}" class="tp-input tp-textarea" placeholder="${esc(c.placeholder || '')}" rows="${c.rows || 3}" ${required}></textarea>`;
         break;
       case 'date':
-        input = `<input type="date" id="${id}" class="tp-input" ${required}>`;
+        input = `<input type="date" id="${id}" data-field-id="${esc(c.id)}" class="tp-input" ${required}>`;
         break;
       case 'email':
-        input = `<input type="email" id="${id}" class="tp-input" placeholder="${esc(c.placeholder || '')}" ${required}>`;
+        input = `<input type="email" id="${id}" data-field-id="${esc(c.id)}" class="tp-input" placeholder="${esc(c.placeholder || '')}" ${required}>`;
         break;
       case 'phone':
-        input = `<input type="tel" id="${id}" class="tp-input" placeholder="${esc(c.placeholder || '')}" ${required}>`;
+        input = `<input type="tel" id="${id}" data-field-id="${esc(c.id)}" class="tp-input" placeholder="${esc(c.placeholder || '')}" ${required}>`;
         break;
       case 'number':
-        input = `<input type="number" id="${id}" class="tp-input" placeholder="${esc(c.placeholder || '')}" ${required}>`;
+        input = `<input type="number" id="${id}" data-field-id="${esc(c.id)}" class="tp-input" placeholder="${esc(c.placeholder || '')}" ${required}>`;
         break;
       default: // text
-        input = `<input type="text" id="${id}" class="tp-input" placeholder="${esc(c.placeholder || '')}" ${required}>`;
+        input = `<input type="text" id="${id}" data-field-id="${esc(c.id)}" class="tp-input" placeholder="${esc(c.placeholder || '')}" ${required}>`;
     }
 
     const helpText = c.helpText ? `<div class="tp-field-help">${esc(c.helpText)}</div>` : '';
 
     this._pendingBinds.push(el => {
       const inp = el.querySelector(`#${id}`);
-      if (inp) inp.addEventListener('change', () => {
-        this.state.setFormValue(gid, c.id, inp.value);
-      });
+      if (inp) {
+        // Use 'input' (fires on every keystroke/selection) so mobile users who tap
+        // Submit without blurring the last field still have their value captured.
+        const update = () => this.state.setFormValue(gid, c.id, inp.value);
+        inp.addEventListener('input', update);
+        inp.addEventListener('change', update); // covers selects/date pickers
+      }
     });
 
     return `<div class="tp-field">
@@ -265,8 +269,17 @@ class TaxPilotRenderer {
     this._pendingBinds.push(el => {
       const btn = el.querySelector(`#${submitId}`);
       if (btn) btn.addEventListener('click', () => {
+        // Flush any un-blurred field values directly from the DOM before reading state.
+        // This ensures the last focused input on mobile (never blurred before tap) is captured.
+        el.querySelectorAll(`[data-group="${gid}"] [data-field-id]`).forEach(inp => {
+          this.state.setFormValue(gid, inp.dataset.fieldId, inp.value);
+        });
         const values = this.state.getFormValues(gid);
-        // Merge form values into the action params
+
+        // Immediately disable button + show loading to prevent double-submit
+        btn.disabled = true;
+        btn.innerHTML = '<span class="tp-btn-spinner"></span> Sending…';
+
         if (c.action) {
           const action = { ...c.action };
           if (action.type === 'tool_call') {
@@ -334,6 +347,11 @@ class TaxPilotRenderer {
       if (btn) btn.addEventListener('click', () => {
         const selected = this.state.getSelections(gid);
         if (c.minSelect && selected.length < c.minSelect) return;
+
+        // Disable button + show loading state immediately
+        btn.disabled = true;
+        btn.innerHTML = '<span class="tp-btn-spinner"></span> Sending…';
+
         if (c.action) {
           const action = { ...c.action };
           if (action.type === 'tool_call') {
