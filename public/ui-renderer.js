@@ -317,13 +317,18 @@ class TaxPilotRenderer {
 
     this._pendingBinds.push(el => {
       const btn = el.querySelector(`#${submitId}`);
+      console.log('[TaxPilot] Form group bind — submitBtn found:', !!btn, 'gid:', gid);
       if (btn) btn.addEventListener('click', () => {
+        console.log('[TaxPilot] Continue/Submit button clicked for group:', gid);
         // Flush any un-blurred field values directly from the DOM before reading state.
         // This ensures the last focused input on mobile (never blurred before tap) is captured.
-        el.querySelectorAll(`[data-group="${gid}"] [data-field-id]`).forEach(inp => {
+        const fieldEls = el.querySelectorAll(`[data-group="${gid}"] [data-field-id]`);
+        console.log('[TaxPilot] DOM flush — found', fieldEls.length, 'field elements');
+        fieldEls.forEach(inp => {
           this.state.setFormValue(gid, inp.dataset.fieldId, inp.value);
         });
         const values = this.state.getFormValues(gid);
+        console.log('[TaxPilot] Collected form values:', JSON.stringify(values));
 
         // Disable button + show loading; store original label so it can be
         // restored by the error handler in chat.html if the REST call fails.
@@ -334,12 +339,15 @@ class TaxPilotRenderer {
 
         if (c.action) {
           const action = { ...c.action };
+          console.log('[TaxPilot] Dispatching action:', action.type, action.tool || action.toolName || '');
           if (action.type === 'tool_call') {
             action.parameters = { ...(action.parameters || {}), formData: values };
           } else if (action.type === 'submit_form') {
             action.formData = values;
           }
           this._handleAction(action);
+        } else {
+          console.warn('[TaxPilot] No action attached to form group — nothing to dispatch');
         }
       });
     });
@@ -398,6 +406,7 @@ class TaxPilotRenderer {
       const btn = el.querySelector(`#${submitId}`);
       if (btn) btn.addEventListener('click', () => {
         const selected = this.state.getSelections(gid);
+        console.log('[TaxPilot] MultiSelect submit clicked. selections:', selected, 'minSelect:', c.minSelect);
         if (c.minSelect && selected.length < c.minSelect) return;
 
         // Disable button + show loading; store original label for error restore
@@ -439,6 +448,7 @@ class TaxPilotRenderer {
         const optEl = el.querySelector(`#${oid}`);
         if (optEl) optEl.addEventListener('click', () => {
           if (actionDispatched) return; // prevent double-click
+          console.log('[TaxPilot] SelectionCard option clicked:', opt.id, opt.label);
           // Visually select
           const parent = optEl.closest('.tp-sel-options');
           parent.querySelectorAll('.tp-sopt--selected').forEach(s => s.classList.remove('tp-sopt--selected'));

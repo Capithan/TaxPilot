@@ -1591,6 +1591,7 @@
     <div class="status-pill">
       <span class="dot" id="statusDot"></span>
       <span id="statusText">Connected</span>
+      <span style="opacity:0.5;font-size:0.65rem;margin-left:4px" title="Build version">v2.1</span>
     </div>
     <button class="header-btn" onclick="toggleDarkMode()" title="Toggle dark mode" aria-label="Toggle dark mode">
       <svg id="themeIcon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1704,8 +1705,26 @@
   </div>
 </div>
 
-<script src="ui-renderer.js"></script>
+<script src="ui-renderer.js?v=20260225"></script>
 <script>
+  // ── Global Error Catcher ──────────────────────────────
+  window.onerror = function(msg, url, line, col, error) {
+    console.error('[TaxPilot][GLOBAL ERROR]', msg, 'at', url, ':', line, ':', col, error);
+    var toast = document.createElement('div');
+    toast.style.cssText = 'position:fixed;top:10px;left:50%;transform:translateX(-50%);background:#ff4444;color:#fff;padding:10px 20px;border-radius:8px;z-index:99999;font-size:14px;max-width:90vw;word-break:break-all;';
+    toast.textContent = '[Error] ' + msg;
+    document.body.appendChild(toast);
+    setTimeout(function(){ toast.remove(); }, 8000);
+  };
+  window.addEventListener('unhandledrejection', function(e) {
+    console.error('[TaxPilot][UNHANDLED PROMISE]', e.reason);
+    var toast = document.createElement('div');
+    toast.style.cssText = 'position:fixed;top:10px;left:50%;transform:translateX(-50%);background:#ff4444;color:#fff;padding:10px 20px;border-radius:8px;z-index:99999;font-size:14px;max-width:90vw;word-break:break-all;';
+    toast.textContent = '[Promise Error] ' + (e.reason && e.reason.message || e.reason);
+    document.body.appendChild(toast);
+    setTimeout(function(){ toast.remove(); }, 8000);
+  });
+
   // ── Dark Mode Toggle ──────────────────────────────────
   function toggleDarkMode() {
     const html = document.documentElement;
@@ -1780,30 +1799,38 @@
         // calls; routing them through GPT is slower and unreliable on every request.
         var toolName = action.toolName || action.tool || '';
         var toolParams = Object.assign({}, action.parameters || {}, action.toolArgs || {});
+        console.log('[TaxPilot] handleUIAction tool_call:', toolName, JSON.stringify(toolParams).slice(0, 200));
         if (!toolName) break;
 
         addTypingIndicator();
         setLoading(true);
         ;(async function callToolDirectly() {
           try {
+            var reqBody = JSON.stringify({ name: toolName, args: toolParams });
+            console.log('[TaxPilot] POST /api/tools/call body:', reqBody.slice(0, 300));
             var resp = await fetch('/api/tools/call', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ name: toolName, args: toolParams }),
+              body: reqBody,
             });
             removeTypingIndicator();
+            console.log('[TaxPilot] Response status:', resp.status);
             if (!resp.ok) {
               var errBody = await resp.json().catch(function() { return {}; });
               throw new Error(errBody.error || 'HTTP ' + resp.status);
             }
             var data = await resp.json();
+            console.log('[TaxPilot] Response keys:', Object.keys(data));
+            console.log('[TaxPilot] Has structuredContent:', !!data.structuredContent, '| Has components:', Array.isArray(data.components), '| Has screen:', !!data.screen);
             // Prefer StructuredUIResponse (interactive components) over plain text
-            var structUi = data.structuredContent || (Array.isArray(data.components) ? data : null);
+            var structUi = data.structuredContent || null;
             // Also detect top-level response with screen + components (spread format)
             if (!structUi && data.screen && Array.isArray(data.components)) {
               structUi = data;
             }
+            console.log('[TaxPilot] structUi resolved:', !!structUi, structUi ? 'components=' + (structUi.components || []).length : '');
             if (structUi && Array.isArray(structUi.components)) {
+              console.log('[TaxPilot] → Rendering structured UI, screen:', structUi.screen, 'componentTypes:', structUi.components.map(function(c){return c.type}).join(','));
               addStructuredMessage(structUi);
             } else if (data.raw) {
               addMessage('assistant', data.raw);
@@ -2006,6 +2033,7 @@
    * Optionally shows the ChatGPT text reply above the structured components.
    */
   function addStructuredMessage(structuredUI, textReply) {
+    console.log('[TaxPilot] addStructuredMessage called. screen:', structuredUI.screen, 'components:', (structuredUI.components || []).length);
     var welcome = document.getElementById('welcome');
     if (welcome) welcome.remove();
 
@@ -2030,6 +2058,7 @@
     contentDiv.className = 'message-content';
 
     // Render structured UI components
+    console.log('[TaxPilot] Rendering structured UI into message bubble...');
     contentDiv.innerHTML = uiRenderer.render(structuredUI);
 
     body.appendChild(sender);
@@ -2039,6 +2068,7 @@
     container.appendChild(div);
 
     // Attach event handlers after DOM insertion
+    console.log('[TaxPilot] Binding event handlers to rendered components...');
     uiRenderer.bind(contentDiv);
 
     // Trigger confetti for success banners
@@ -2049,6 +2079,7 @@
       if (hasConfetti) triggerConfetti(contentDiv);
     }
 
+    console.log('[TaxPilot] Structured message added and bound successfully.');
     scrollToBottom();
   }
 
@@ -2156,6 +2187,7 @@
    * Used by starter buttons and the flow UI to ensure deterministic, instant results.
    */
   async function sendDirectToolCall(toolName, toolArgs) {
+    console.log('[TaxPilot] sendDirectToolCall:', toolName, JSON.stringify(toolArgs));
     var welcome = document.getElementById('welcome');
     if (welcome) welcome.remove();
 

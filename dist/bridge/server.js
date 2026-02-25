@@ -58,7 +58,19 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.text({ type: 'text/plain' }));
-app.use(express.static('public'));
+app.use(express.static('public', {
+    etag: false,
+    lastModified: true,
+    setHeaders: (res, filePath) => {
+        // Disable caching for HTML and JS files during development so changes
+        // are picked up immediately without a hard refresh.
+        if (filePath.endsWith('.html') || filePath.endsWith('.js')) {
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+            res.setHeader('Pragma', 'no-cache');
+            res.setHeader('Expires', '0');
+        }
+    },
+}));
 // ChatGPT Plugin manifest
 app.get('/.well-known/ai-plugin.json', (_req, res) => {
     try {
