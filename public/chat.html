@@ -1298,14 +1298,26 @@
       }
 
       .tp-sel-options { grid-template-columns: 1fr; }
-      .tp-steps { flex-wrap: wrap; }
+      .tp-steps { flex-wrap: wrap; justify-content: flex-start; }
       .tp-carousel-nav { display: none; }
       /* Carousel items should not overflow viewport */
       .tp-carousel-item { min-width: min(260px, 78vw); }
       .tp-appt-summary { border-width: 1.5px; }
-      .tp-pro-card { min-width: 220px; }
+      .tp-pro-card { min-width: 0; width: 100%; }
       /* Appointment action row wraps properly */
       .tp-appt-actions { flex-direction: column; }
+      /* Prevent all structured components from overflowing */
+      .tp-structured { max-width: 100%; overflow-x: hidden; }
+      .message-content { max-width: 100%; overflow-x: hidden; }
+      /* Form groups fill the message bubble properly */
+      .tp-form-group { padding: 14px; }
+      .tp-multisel { padding: 0; }
+      /* Info card fields stack on narrow */
+      .tp-cardfield { flex-wrap: wrap; }
+      .tp-cardfield-label { min-width: 80px; }
+      /* Tab list scrolls horizontally */
+      .tp-tab-list { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      .tp-tab { padding: 8px 14px; font-size: 0.82rem; }
     }
 
     /* Extra-small phones (≤ 480px) */
@@ -1326,11 +1338,88 @@
       /* Form inputs & buttons hit minimum 44px tap targets on touch */
       .tp-btn { min-height: 44px; padding: 10px 14px; font-size: 0.88rem; }
       .tp-input { min-height: 44px; font-size: 16px; } /* 16px also prevents iOS zoom */
-      .tp-sopt { padding: 12px; }
-      .tp-mopt { padding: 10px 12px; }
+      .tp-sopt { padding: 12px; min-height: 44px; }
+      .tp-mopt { padding: 10px 12px; min-height: 44px; }
 
       /* Stack appointment/pro action buttons vertically */
       .tp-pro-actions { flex-direction: column; }
+      .tp-pro-actions .tp-btn { width: 100%; }
+
+      /* Welcome starters stack single-column */
+      .starters { grid-template-columns: 1fr; }
+      .starter-btn { padding: 14px; }
+
+      /* Message bubble take full width */
+      .message-content { padding: 10px 12px; }
+
+      /* Date selects may overflow — ensure they wrap */
+      .tp-date-selects { flex-wrap: wrap; }
+      .tp-date-sel { min-width: 80px; flex: 1 1 80px; }
+
+      /* Checklist items compact */
+      .tp-chk-item { padding: 8px 10px; }
+      .tp-chk-text { font-size: 0.85rem; }
+
+      /* Info card fields */
+      .tp-cardfield { font-size: 0.82rem; gap: 6px; }
+      .tp-cardfield-label { min-width: 70px; font-size: 0.78rem; }
+    }
+
+    /* Ultra-small screens (≤ 320px, e.g. iPhone SE, older Androids) */
+    @media (max-width: 320px) {
+      header { padding: 0 8px; height: 56px; }
+      .logo-text .app-name { font-size: 0.9rem; }
+      .logo-text .app-sub { display: none; }
+      .header-btn { width: 32px; height: 32px; }
+      .logo-img { height: 32px; }
+
+      .flow-stages { padding: 8px 6px; }
+      .flow-stage-dot { width: 18px; height: 18px; font-size: 9px; }
+      .flow-stage-line { width: 8px; }
+
+      .chat-container { padding: 8px 4px; }
+      .chat-messages { gap: 12px; }
+
+      .message-avatar { width: 24px; height: 24px; font-size: 10px; }
+      .message-content { padding: 8px 10px; font-size: 0.85rem; }
+
+      .tp-form-group { padding: 10px; }
+      .tp-form-title { font-size: 0.92rem; }
+      .tp-form-desc { font-size: 0.78rem; }
+      .tp-field-label { font-size: 0.78rem; }
+      .tp-input { padding: 8px 10px; }
+
+      .tp-sopt { padding: 10px; }
+      .tp-sopt-icon { width: 28px; height: 28px; font-size: 14px; }
+      .tp-sopt-label { font-size: 0.82rem; }
+      .tp-sopt-desc { font-size: 0.72rem; }
+
+      .tp-mopt { padding: 8px 10px; }
+      .tp-mopt-icon { font-size: 1.1rem; }
+      .tp-mopt-label { font-size: 0.85rem; }
+
+      .input-area { padding: 8px 8px calc(8px + env(safe-area-inset-bottom, 0px)); }
+      .input-box { padding: 6px 10px; }
+      #sendBtn { width: 36px; height: 36px; border-radius: 10px; }
+    }
+
+    /* Mid-width tablets (641–768px) */
+    @media (min-width: 641px) and (max-width: 768px) {
+      .starters { grid-template-columns: 1fr 1fr; gap: 8px; }
+      .tp-sel-options { grid-template-columns: 1fr 1fr; }
+      .chat-messages { max-width: 680px; }
+      .tp-carousel-item { min-width: 240px; }
+    }
+
+    /* Landscape phones */
+    @media (max-height: 500px) and (orientation: landscape) {
+      header { height: 48px; }
+      .flow-stages { padding: 6px 12px; }
+      .flow-stage-dot { width: 20px; height: 20px; font-size: 10px; }
+      .welcome { padding: 20px 16px 16px; }
+      .welcome h2 { font-size: 1.1rem; }
+      .welcome p { font-size: 0.85rem; margin-bottom: 16px; }
+      .input-area { padding: 8px 16px calc(8px + env(safe-area-inset-bottom, 0px)); }
     }
 
     /* ── Accessibility: Focus Visible ─────────────────── */
@@ -1564,7 +1653,7 @@
       <h2>Welcome to TaxPilot</h2>
       <p>Your AI-powered tax intake assistant by H&amp;R Block. I'll guide you through collecting your information, generating a document checklist, and matching you with the right tax professional.</p>
       <div class="starters">
-        <button class="starter-btn" onclick="sendStarter('I need to prepare for my tax appointment')">
+        <button class="starter-btn" onclick="sendDirectToolCall('start_intake', {})">
           <div class="starter-icon">&#x1F4DD;</div>
           <div class="starter-title">Prepare for appointment</div>
           <div class="starter-desc">Start the full intake process</div>
@@ -1703,16 +1792,30 @@
               body: JSON.stringify({ name: toolName, args: toolParams }),
             });
             removeTypingIndicator();
-            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            if (!resp.ok) {
+              var errBody = await resp.json().catch(function() { return {}; });
+              throw new Error(errBody.error || 'HTTP ' + resp.status);
+            }
             var data = await resp.json();
             // Prefer StructuredUIResponse (interactive components) over plain text
             var structUi = data.structuredContent || (Array.isArray(data.components) ? data : null);
+            // Also detect top-level response with screen + components (spread format)
+            if (!structUi && data.screen && Array.isArray(data.components)) {
+              structUi = data;
+            }
             if (structUi && Array.isArray(structUi.components)) {
               addStructuredMessage(structUi);
             } else if (data.raw) {
               addMessage('assistant', data.raw);
+            } else if (data._text) {
+              addMessage('assistant', data._text);
             } else if (typeof data === 'object') {
               addMessage('assistant', JSON.stringify(data, null, 2));
+            }
+            // Update session state from response data (sessionId, clientId, etc.)
+            if (data.data) {
+              if (data.data.sessionId) sessionState.update({ sessionId: data.data.sessionId });
+              if (data.data.clientId) sessionState.update({ clientId: data.data.clientId });
             }
           } catch (err) {
             removeTypingIndicator();
@@ -1724,7 +1827,13 @@
               b.removeAttribute('data-form-pending');
               b.removeAttribute('data-original-label');
             });
-            addMessage('assistant', '\u26A0\uFE0F Submission failed: ' + err.message + '. Please try again.');
+            // Also re-enable any selection card items that were disabled
+            document.querySelectorAll('[data-selection-pending="true"]').forEach(function(el) {
+              el.style.pointerEvents = '';
+              el.style.opacity = '';
+              el.removeAttribute('data-selection-pending');
+            });
+            addMessage('assistant', '\u26A0\uFE0F Submission failed: ' + (err.message || err) + '. Please try again.');
           } finally {
             setLoading(false);
           }
@@ -2024,12 +2133,66 @@
       // render it directly instead of relying on tryParse to find JSON in text.
       if (data.structuredUI && data.structuredUI.components) {
         addStructuredMessage(data.structuredUI, data.reply);
-      } else {
+        // Track session/client IDs
+        if (data.structuredUI.data) {
+          if (data.structuredUI.data.sessionId) sessionState.update({ sessionId: data.structuredUI.data.sessionId });
+          if (data.structuredUI.data.clientId) sessionState.update({ clientId: data.structuredUI.data.clientId });
+        }
+      } else if (data.reply) {
         addMessage('assistant', data.reply);
+      } else {
+        addMessage('assistant', '\u26A0\uFE0F No response received. Please try again.');
       }
     } catch (err) {
       removeTypingIndicator();
-      addMessage('assistant', '\u26A0\uFE0F Sorry, something went wrong: ' + err.message + '\n\nPlease make sure your OPENAI_API_KEY is configured.');
+      addMessage('assistant', '\u26A0\uFE0F Sorry, something went wrong: ' + (err.message || err) + '\n\nPlease make sure your OPENAI_API_KEY is configured, or use the quick-start buttons above to begin.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  /**
+   * Call an MCP tool directly (bypasses ChatGPT LLM) and render the structured UI.
+   * Used by starter buttons and the flow UI to ensure deterministic, instant results.
+   */
+  async function sendDirectToolCall(toolName, toolArgs) {
+    var welcome = document.getElementById('welcome');
+    if (welcome) welcome.remove();
+
+    addTypingIndicator();
+    setLoading(true);
+
+    try {
+      var resp = await fetch('/api/tools/call', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: toolName, args: toolArgs || {} }),
+      });
+      removeTypingIndicator();
+      if (!resp.ok) {
+        var errBody = await resp.json().catch(function() { return {}; });
+        throw new Error(errBody.error || 'HTTP ' + resp.status);
+      }
+      var data = await resp.json();
+      var structUi = data.structuredContent || (Array.isArray(data.components) ? data : null);
+      if (!structUi && data.screen && Array.isArray(data.components)) structUi = data;
+      if (structUi && Array.isArray(structUi.components)) {
+        addStructuredMessage(structUi);
+      } else if (data.raw) {
+        addMessage('assistant', data.raw);
+      } else if (data._text) {
+        addMessage('assistant', data._text);
+      } else {
+        addMessage('assistant', JSON.stringify(data, null, 2));
+      }
+      // Track session/client IDs from the tool response
+      if (data.data) {
+        if (data.data.sessionId) sessionState.update({ sessionId: data.data.sessionId });
+        if (data.data.clientId) sessionState.update({ clientId: data.data.clientId });
+      }
+    } catch (err) {
+      removeTypingIndicator();
+      addMessage('assistant', '\u26A0\uFE0F Failed to start: ' + (err.message || err) + '. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -2069,7 +2232,13 @@
 
   function scrollToBottom() {
     var c = document.getElementById('chatContainer');
-    requestAnimationFrame(function() { c.scrollTop = c.scrollHeight; });
+    // Double-rAF ensures DOM layout has settled (especially on mobile browsers
+    // where rendering may be deferred until the next composite).
+    requestAnimationFrame(function() {
+      requestAnimationFrame(function() {
+        c.scrollTop = c.scrollHeight;
+      });
+    });
   }
 
   function setLoading(val) {

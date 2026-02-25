@@ -427,6 +427,8 @@ class TaxPilotRenderer {
   _renderSelectionCard(c) {
     const gid = this._uid('sel');
     const title = c.title ? `<div class="tp-sel-title">${esc(c.title)}</div>` : '';
+    // Track if an action has already been dispatched (prevents double-click)
+    let actionDispatched = false;
     const options = (c.options || []).map(opt => {
       const oid = this._uid('sopt');
       const icon = opt.icon ? `<span class="tp-sopt-icon">${opt.icon}</span>` : '';
@@ -436,10 +438,20 @@ class TaxPilotRenderer {
       this._pendingBinds.push(el => {
         const optEl = el.querySelector(`#${oid}`);
         if (optEl) optEl.addEventListener('click', () => {
+          if (actionDispatched) return; // prevent double-click
           // Visually select
           const parent = optEl.closest('.tp-sel-options');
           parent.querySelectorAll('.tp-sopt--selected').forEach(s => s.classList.remove('tp-sopt--selected'));
           optEl.classList.add('tp-sopt--selected');
+
+          // Disable all options & show loading on selected
+          actionDispatched = true;
+          parent.querySelectorAll('.tp-sopt').forEach(s => {
+            s.style.pointerEvents = 'none';
+            s.setAttribute('data-selection-pending', 'true');
+            if (s !== optEl) s.style.opacity = '0.5';
+          });
+
           // Fire action with selection
           if (c.action) {
             const action = { ...c.action };
