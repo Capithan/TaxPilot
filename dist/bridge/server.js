@@ -15,9 +15,8 @@ import { formatIntakeStart, formatIntakeResponse, formatIntakeProgress, formatCl
 import { formatDocumentChecklist as formatDocChecklistUI, formatDocumentCollected, formatPendingDocuments, } from '../ui/formatters/checklist.js';
 import { formatRoutingResult, formatTaxProRecommendations, formatAppointmentEstimate as formatEstimateUI, formatAppointmentCreated, } from '../ui/formatters/routing.js';
 import { formatRemindersCreated, formatRemindersList, formatReminderSent, formatNotificationSent, } from '../ui/formatters/reminders.js';
-import { formatWelcomeScreen } from '../ui/formatters/welcome.js';
 import { toReadableText } from '../ui/toReadableText.js';
-import { toHtmlWidget } from '../ui/toHtmlWidget.js';
+import { getAppWidgetHtml, APP_WIDGET_MIME_TYPE } from '../ui/appWidgetHtml.js';
 /** Wrap a UIResponse into the MCP content block format with structuredContent for Apps SDK widget. */
 function toMcpContent(uiResp) {
     const readable = toReadableText(uiResp);
@@ -386,8 +385,8 @@ app.get('/api/tools', (_req, res) => {
 });
 // ── MCP Apps Widget Resource URI ────────────────────────────────────────────
 const WIDGET_RESOURCE_URI_BASE = 'ui://taxpilot/widget.html';
-// 'text/html+skybridge' is the mime type used by ChatGPT's Apps SDK (Skybridge runtime)
-const WIDGET_MIME_TYPE = 'text/html+skybridge';
+// Official MIME type per https://developers.openai.com/apps-sdk/build/mcp-server
+const WIDGET_MIME_TYPE = APP_WIDGET_MIME_TYPE;
 /** Get the current widget resource URI (versioned so ChatGPT fetches fresh HTML after each tool call) */
 function getWidgetResourceUri() {
     return toolResultVersion > 0
@@ -396,27 +395,12 @@ function getWidgetResourceUri() {
 }
 /**
  * Build the widget HTML for resources/read.
- * When tool data is available, returns a STATIC pre-rendered HTML document
- * (no JavaScript needed — works in any sandboxed iframe).
- * When no data yet, returns the interactive widget as a fallback.
+ * Returns a GENERIC JavaScript-powered template that receives tool data
+ * via the MCP Apps bridge (window.openai.toolOutput + postMessage).
+ * Per https://developers.openai.com/apps-sdk/build/chatgpt-ui/
  */
-function readWidgetHtml(embedData) {
-    // If we have tool data, produce a fully server-side rendered HTML document.
-    // This is static CSS+HTML — no JS execution needed, no fetch, no bridge.
-    if (embedData) {
-        const staticHtml = toHtmlWidget(embedData);
-        if (staticHtml)
-            return staticHtml;
-    }
-    // No tool data yet — return a STATIC welcome page (no JavaScript needed).
-    // The interactive widget fallback is NOT used because ChatGPT's iframe
-    // sandbox blocks all JS fetch/postMessage calls.
-    const welcomeData = formatWelcomeScreen();
-    const welcomeHtml = toHtmlWidget(welcomeData);
-    if (welcomeHtml)
-        return welcomeHtml;
-    // Last resort fallback: simple static HTML
-    return `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>body{font-family:sans-serif;padding:24px;background:#F5F0E8;color:#1a1a1a}h1{color:#00A13A;margin-bottom:8px}.sub{color:#555}</style></head><body><h1>🟢 TaxPilot — H&amp;R Block</h1><p class="sub">Use a tool to get started. Try: <strong>Start guided intake</strong></p></body></html>`;
+function readWidgetHtml() {
+    return getAppWidgetHtml();
 }
 // ── Tool descriptor meta — matches OpenAI Apps SDK Skybridge format ─────────
 // Required fields per github.com/openai/openai-apps-sdk-examples:
@@ -650,14 +634,6 @@ app.post('/sse', (req, res) => {
             ui: { resourceUri: versionedUri },
             'ui/resourceUri': versionedUri,
         };
-        // Also inject _meta into structuredContent so it's visible in both places
-        if (toolResult.structuredContent) {
-            toolResult.structuredContent._meta = {
-                ...(toolResult.structuredContent._meta || {}),
-                ui: { resourceUri: versionedUri },
-                'ui/resourceUri': versionedUri,
-            };
-        }
         const response = {
             ...toolResult,
             _meta: invocationMeta,
@@ -684,8 +660,7 @@ app.post('/sse', (req, res) => {
                         mimeType: WIDGET_MIME_TYPE,
                         description: 'H&R Block TaxPilot interactive UI widget — renders intake forms, document checklists, tax pro cards, and appointment summaries.',
                         _meta: {
-                            'openai/outputTemplate': WIDGET_RESOURCE_URI_BASE,
-                            'openai/widgetAccessible': true,
+                            ui: { prefersBorder: true },
                         },
                     }]
             }
@@ -705,22 +680,19 @@ app.post('/sse', (req, res) => {
                         uriTemplate: WIDGET_RESOURCE_URI_BASE,
                         mimeType: WIDGET_MIME_TYPE,
                         description: 'H&R Block TaxPilot interactive UI widget',
-                        _meta: {
-                            'openai/outputTemplate': WIDGET_RESOURCE_URI_BASE,
-                            'openai/widgetAccessible': true,
-                        },
+                        _meta: { ui: { prefersBorder: true } },
                     }]
             }
         });
         return;
     }
-    // Handle resources/read - return pre-rendered HTML (static, no JS needed)
+    // Handle resources/read - return JS-powered widget template
     if (method === 'resources/read') {
         const uri = params?.uri || '';
         // Accept base URI or any versioned variant (ui://taxpilot/widget.html?v=N)
         if (uri.startsWith(WIDGET_RESOURCE_URI_BASE)) {
             try {
-                const html = readWidgetHtml(latestToolResult);
+                const html = readWidgetHtml();
                 res.setHeader('Content-Type', 'application/json');
                 res.json({
                     jsonrpc: '2.0',
@@ -874,14 +846,6 @@ app.post('/messages', (req, res) => {
                 ui: { resourceUri: legacyVersionedUri },
                 'ui/resourceUri': legacyVersionedUri,
             };
-            // Inject into structuredContent too
-            if (legacyToolResult.structuredContent) {
-                legacyToolResult.structuredContent._meta = {
-                    ...(legacyToolResult.structuredContent._meta || {}),
-                    ui: { resourceUri: legacyVersionedUri },
-                    'ui/resourceUri': legacyVersionedUri,
-                };
-            }
             response = {
                 jsonrpc: '2.0',
                 id,
@@ -900,7 +864,7 @@ app.post('/messages', (req, res) => {
                             uri: WIDGET_RESOURCE_URI_BASE,
                             mimeType: WIDGET_MIME_TYPE,
                             description: 'H&R Block TaxPilot interactive UI widget',
-                            _meta: { 'openai/outputTemplate': WIDGET_RESOURCE_URI_BASE, 'openai/widgetAccessible': true },
+                            _meta: { ui: { prefersBorder: true } },
                         }]
                 }
             };
@@ -917,7 +881,7 @@ app.post('/messages', (req, res) => {
                             uriTemplate: WIDGET_RESOURCE_URI_BASE,
                             mimeType: WIDGET_MIME_TYPE,
                             description: 'H&R Block TaxPilot interactive UI widget',
-                            _meta: { 'openai/outputTemplate': WIDGET_RESOURCE_URI_BASE, 'openai/widgetAccessible': true },
+                            _meta: { ui: { prefersBorder: true } },
                         }]
                 }
             };
@@ -927,7 +891,7 @@ app.post('/messages', (req, res) => {
             // Accept base URI or any versioned variant (ui://taxpilot/widget.html?v=N)
             if (readUri.startsWith(WIDGET_RESOURCE_URI_BASE)) {
                 try {
-                    const html = readWidgetHtml(latestToolResult);
+                    const html = readWidgetHtml();
                     response = {
                         jsonrpc: '2.0',
                         id,
