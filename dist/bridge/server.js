@@ -15,6 +15,7 @@ import { formatIntakeStart, formatIntakeResponse, formatIntakeProgress, formatCl
 import { formatDocumentChecklist as formatDocChecklistUI, formatDocumentCollected, formatPendingDocuments, } from '../ui/formatters/checklist.js';
 import { formatRoutingResult, formatTaxProRecommendations, formatAppointmentEstimate as formatEstimateUI, formatAppointmentCreated, } from '../ui/formatters/routing.js';
 import { formatRemindersCreated, formatRemindersList, formatReminderSent, formatNotificationSent, } from '../ui/formatters/reminders.js';
+import { formatWelcomeScreen } from '../ui/formatters/welcome.js';
 import { toReadableText } from '../ui/toReadableText.js';
 import { toHtmlWidget } from '../ui/toHtmlWidget.js';
 /** Wrap a UIResponse into the MCP content block format with structuredContent for Apps SDK widget. */
@@ -407,16 +408,15 @@ function readWidgetHtml(embedData) {
         if (staticHtml)
             return staticHtml;
     }
-    // Fallback: return the interactive widget (for cases before any tool call)
-    const publicDir = path.join(__dirname, '..', '..', 'public');
-    const widgetPath = path.join(publicDir, 'taxpilot-widget.html');
-    let html = fs.readFileSync(widgetPath, 'utf-8');
-    // Inject server URL for polling fallback
-    const host = process.env.WEBSITE_HOSTNAME;
-    const serverUrl = host ? `https://${host}` : '';
-    const injection = `<script>window.__TAXPILOT_SERVER__ = '${serverUrl}';</script>`;
-    html = html.replace('</head>', `${injection}\n</head>`);
-    return html;
+    // No tool data yet — return a STATIC welcome page (no JavaScript needed).
+    // The interactive widget fallback is NOT used because ChatGPT's iframe
+    // sandbox blocks all JS fetch/postMessage calls.
+    const welcomeData = formatWelcomeScreen();
+    const welcomeHtml = toHtmlWidget(welcomeData);
+    if (welcomeHtml)
+        return welcomeHtml;
+    // Last resort fallback: simple static HTML
+    return `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>body{font-family:sans-serif;padding:24px;background:#F5F0E8;color:#1a1a1a}h1{color:#00A13A;margin-bottom:8px}.sub{color:#555}</style></head><body><h1>🟢 TaxPilot — H&amp;R Block</h1><p class="sub">Use a tool to get started. Try: <strong>Start guided intake</strong></p></body></html>`;
 }
 // ── Tool descriptor meta — matches OpenAI Apps SDK Skybridge format ─────────
 // Required fields per github.com/openai/openai-apps-sdk-examples:
@@ -635,13 +635,29 @@ app.post('/sse', (req, res) => {
             toolResultVersion++;
         }
         // Per Apps SDK spec: tool call _meta must carry invocation labels + output template
+        // Also include ui.resourceUri with VERSIONED URI so ChatGPT re-fetches fresh pre-rendered HTML
+        const versionedUri = getWidgetResourceUri();
         const calledTool = mcpTools.find(t => t.name === toolName);
         const invocationMeta = calledTool ? {
-            'openai/outputTemplate': URI,
+            'openai/outputTemplate': versionedUri,
             'openai/toolInvocation/invoking': calledTool._meta['openai/toolInvocation/invoking'],
             'openai/toolInvocation/invoked': calledTool._meta['openai/toolInvocation/invoked'],
             'openai/widgetAccessible': true,
-        } : { 'openai/outputTemplate': URI };
+            ui: { resourceUri: versionedUri },
+            'ui/resourceUri': versionedUri,
+        } : {
+            'openai/outputTemplate': versionedUri,
+            ui: { resourceUri: versionedUri },
+            'ui/resourceUri': versionedUri,
+        };
+        // Also inject _meta into structuredContent so it's visible in both places
+        if (toolResult.structuredContent) {
+            toolResult.structuredContent._meta = {
+                ...(toolResult.structuredContent._meta || {}),
+                ui: { resourceUri: versionedUri },
+                'ui/resourceUri': versionedUri,
+            };
+        }
         const response = {
             ...toolResult,
             _meta: invocationMeta,
@@ -844,13 +860,28 @@ app.post('/messages', (req, res) => {
                 latestToolResult = legacyToolResult.structuredContent;
                 toolResultVersion++;
             }
+            const legacyVersionedUri = getWidgetResourceUri();
             const legacyTool = mcpTools.find(t => t.name === params.name);
             const legacyMeta = legacyTool ? {
-                'openai/outputTemplate': URI,
+                'openai/outputTemplate': legacyVersionedUri,
                 'openai/toolInvocation/invoking': legacyTool._meta['openai/toolInvocation/invoking'],
                 'openai/toolInvocation/invoked': legacyTool._meta['openai/toolInvocation/invoked'],
                 'openai/widgetAccessible': true,
-            } : { 'openai/outputTemplate': URI };
+                ui: { resourceUri: legacyVersionedUri },
+                'ui/resourceUri': legacyVersionedUri,
+            } : {
+                'openai/outputTemplate': legacyVersionedUri,
+                ui: { resourceUri: legacyVersionedUri },
+                'ui/resourceUri': legacyVersionedUri,
+            };
+            // Inject into structuredContent too
+            if (legacyToolResult.structuredContent) {
+                legacyToolResult.structuredContent._meta = {
+                    ...(legacyToolResult.structuredContent._meta || {}),
+                    ui: { resourceUri: legacyVersionedUri },
+                    'ui/resourceUri': legacyVersionedUri,
+                };
+            }
             response = {
                 jsonrpc: '2.0',
                 id,
