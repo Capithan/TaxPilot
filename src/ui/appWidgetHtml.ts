@@ -296,6 +296,8 @@ function renderFormGroup(c) {
   var fid = 'form-' + (++_formId);
   const title = c.title ? '<div class="tp-form-title">' + esc(c.title) + '</div>' : '';
   const subtitle = c.subtitle ? '<div class="tp-form-desc">' + esc(c.subtitle) + '</div>' : '';
+  // Allow both submitAction (builder schema) and action (legacy schema)
+  const submitAction = c.submitAction || c.action;
   const fields = (c.fields || []).map(function(f) {
     const required = f.required ? '<span class="tp-required">*</span>' : '';
     let input = '';
@@ -316,7 +318,7 @@ function renderFormGroup(c) {
     : '<div class="tp-form-note">\\uD83D\\uDCAC Answer in the chat to continue</div>';
   // Embed the tool_call action as data attribute so click handler can call the tool directly
   var actionAttr = '';
-  var nAct = normalizeAction(c.action);
+  var nAct = normalizeAction(submitAction);
   if (nAct && nAct.type === 'tool_call' && nAct.tool) {
     actionAttr = ' data-form-action="' + JSON.stringify(nAct).replace(/"/g, '&quot;') + '"';
   }
@@ -325,6 +327,7 @@ function renderFormGroup(c) {
 
 function renderSelectionCard(c) {
   const title = c.title ? '<div class="tp-sel-title">' + esc(c.title) + '</div>' : '';
+  const selAction = c.action || c.submitAction;
   const options = (c.options || []).map(function(opt) {
     const icon = opt.icon ? '<span class="tp-sopt-icon">' + opt.icon + '</span>' : '';
     const badge = opt.badge ? '<span class="tp-sopt-badge">' + esc(opt.badge) + '</span>' : '';
@@ -340,7 +343,7 @@ function renderSelectionCard(c) {
   }).join('');
   // Embed the tool_call action on the wrapper so click handler can call the tool directly
   var selActionAttr = '';
-  var nSelAct = normalizeAction(c.action);
+  var nSelAct = normalizeAction(selAction);
   if (nSelAct && nSelAct.type === 'tool_call' && nSelAct.tool) {
     selActionAttr = ' data-sel-action="' + JSON.stringify(nSelAct).replace(/"/g, '&quot;') + '"';
   }
@@ -351,6 +354,7 @@ function renderMultiSelect(c) {
   var mid = 'multi-' + (++_multiId);
   const title = c.title ? '<div class="tp-multisel-title">' + esc(c.title) + '</div>' : '';
   const subtitle = c.subtitle ? '<div class="tp-multisel-sub">' + esc(c.subtitle) + '</div>' : '';
+  const multiAction = c.submitAction || c.action;
   const options = (c.options || []).map(function(opt) {
     const icon = opt.icon ? '<span class="tp-mopt-icon">' + opt.icon + '</span>' : '';
     const desc = opt.description ? '<div class="tp-mopt-desc">' + esc(opt.description) + '</div>' : '';
@@ -360,7 +364,7 @@ function renderMultiSelect(c) {
   }).join('');
   // Embed tool_call action on the wrapper for direct tool invocation
   var multiActionAttr = '';
-  var nMultiAct = normalizeAction(c.action);
+  var nMultiAct = normalizeAction(multiAction);
   if (nMultiAct && nMultiAct.type === 'tool_call' && nMultiAct.tool) {
     multiActionAttr = ' data-multi-action="' + JSON.stringify(nMultiAct).replace(/"/g, '&quot;') + '"';
   }

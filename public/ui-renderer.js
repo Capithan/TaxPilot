@@ -311,6 +311,7 @@ class TaxPilotRenderer {
     const gid = this._uid('fgroup');
     const title = c.title ? `<div class="tp-form-title">${esc(c.title)}</div>` : '';
     const description = c.description ? `<div class="tp-form-desc">${esc(c.description)}</div>` : '';
+    const submitAction = c.submitAction || c.action;
     const fields = (c.fields || []).map(f => this._renderFormField(f, gid)).join('');
     const submitLabel = c.submitLabel || 'Submit';
     const submitId = this._uid('fsubmit');
@@ -337,8 +338,8 @@ class TaxPilotRenderer {
         btn.disabled = true;
         btn.innerHTML = '<span class="tp-btn-spinner"></span> Sending…';
 
-        if (c.action) {
-          const action = { ...c.action };
+        if (submitAction) {
+          const action = { ...submitAction };
           console.log('[TaxPilot] Dispatching action:', action.type, action.tool || action.toolName || '');
           if (action.type === 'tool_call') {
             action.parameters = { ...(action.parameters || {}), formData: values };
@@ -367,6 +368,7 @@ class TaxPilotRenderer {
     const isMulti = c.multiSelect !== false;
     const submitLabel = c.submitLabel || 'Continue';
     const submitId = this._uid('msubmit');
+    const submitAction = c.submitAction || c.action;
 
     const options = (c.options || []).map(opt => {
       const oid = this._uid('mopt');
@@ -415,8 +417,8 @@ class TaxPilotRenderer {
         btn.disabled = true;
         btn.innerHTML = '<span class="tp-btn-spinner"></span> Sending…';
 
-        if (c.action) {
-          const action = { ...c.action };
+        if (submitAction) {
+          const action = { ...submitAction };
           if (action.type === 'tool_call') {
             action.parameters = { ...(action.parameters || {}), selections: selected };
           }
@@ -436,6 +438,7 @@ class TaxPilotRenderer {
   _renderSelectionCard(c) {
     const gid = this._uid('sel');
     const title = c.title ? `<div class="tp-sel-title">${esc(c.title)}</div>` : '';
+    const cardAction = c.action || c.submitAction;
     // Track if an action has already been dispatched (prevents double-click)
     let actionDispatched = false;
     const options = (c.options || []).map(opt => {
@@ -463,8 +466,9 @@ class TaxPilotRenderer {
           });
 
           // Fire action with selection
-          if (c.action) {
-            const action = { ...c.action };
+          const chosenAction = opt.action || cardAction;
+          if (chosenAction) {
+            const action = { ...chosenAction };
             if (action.type === 'tool_call') {
               action.parameters = { ...(action.parameters || {}), selection: opt.id };
             } else if (action.type === 'send_message') {
