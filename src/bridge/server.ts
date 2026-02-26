@@ -70,13 +70,17 @@ import type { UIResponse } from '../ui/types.js';
 import { toReadableText } from '../ui/toReadableText.js';
 import { toHtmlWidget } from '../ui/toHtmlWidget.js';
 import { getAppWidgetHtml, APP_WIDGET_MIME_TYPE } from '../ui/appWidgetHtml.js';
+import { uiResponseToStructured } from '../ui/uiResponseToStructured.js';
 
-/** Wrap a UIResponse into the MCP content block format with structuredContent for Apps SDK widget. */
+/** Wrap a UIResponse into the MCP content block format with structuredContent for Apps SDK widget.
+ *  Always converts to StructuredUIResponse format (screen + components[]) so chat.html can render it. */
 function toMcpContent(uiResp: UIResponse | Record<string, unknown>): { content: Array<{ type: string; text: string }>; structuredContent: Record<string, unknown> } {
   const readable = toReadableText(uiResp as Record<string, unknown>);
+  // Ensure the structuredContent is always in StructuredUIResponse format (screen + components[])
+  const structured = uiResponseToStructured(uiResp as Record<string, unknown>);
   return {
     content: [{ type: 'text', text: readable }],
-    structuredContent: uiResp as unknown as Record<string, unknown>,
+    structuredContent: structured,
   };
 }
 
@@ -703,6 +707,87 @@ function handleToolCall(name: string, args: Record<string, unknown>): { content:
         }
         const { taxPro, reason, alternates } = findBestTaxPro(client);
         return toMcpContent(formatTaxProRecommendations(clientId, taxPro, reason, alternates));
+      }
+
+      // ── Summary confirmation — advances flow to document checklist ──
+      case 'confirm_intake_summary': {
+        const cid = args.clientId as string;
+        const client = db.getClient(cid);
+        if (!client) {
+          return { content: [{ type: 'text', text: 'Client not found' }] };
+        }
+        // Generate checklist automatically upon confirmation
+        const confirmChecklist = generateDocumentChecklist(cid);
+        const confirmUI: Record<string, unknown> = {
+          id: `confirm-${Date.now()}`,
+          screen: 'document_checklist',
+          components: [
+            { type: 'banner', text: '✅ Summary confirmed! Now let\'s prepare your documents.', variant: 'success', icon: '✅', confetti: true },
+            { type: 'text_block', text: 'Document Checklist Generated', style: 'heading' },
+            { type: 'text_block', text: `We found ${confirmChecklist.documents.length} documents you\'ll need for your appointment.`, style: 'body' },
+            { type: 'progress_bar', value: 0, max: confirmChecklist.documents.length, label: `0 of ${confirmChecklist.documents.length} collected` },
+            {
+              type: 'button', label: '📋 View Full Checklist', variant: 'primary', icon: '📋',
+              action: { type: 'tool_call', tool: 'generate_document_checklist', toolName: 'generate_document_checklist', parameters: { clientId: cid } },
+            },
+            {
+              type: 'button', label: '👨‍💼 Skip to Tax Pro Matching', variant: 'secondary', icon: '👨‍💼',
+              action: { type: 'tool_call', tool: 'route_to_tax_pro', toolName: 'route_to_tax_pro', parameters: { clientId: cid } },
+            },
+          ],
+          stateUpdates: { screen: 'document_checklist' },
+          data: { clientId: cid, totalDocuments: confirmChecklist.documents.length },
+          _meta: { toolName: 'confirm_intake_summary', timestamp: new Date().toISOString(), nextSuggestedTools: ['generate_document_checklist', 'route_to_tax_pro'] },
+        };
+        return { content: [{ type: 'text', text: 'Summary confirmed. Document checklist generated.' }], structuredContent: confirmUI };
+      }
+
+      // ── Flow progress — shows current state and next action ──
+      case 'get_flow_progress':
+      case 'get_conversation_flow': {
+        const fpClientId = args.clientId as string;
+        const fpClient = fpClientId ? db.getClient(fpClientId) : null;
+        let flowScreen = 'home';
+        let flowMessage = 'Start your guided intake to begin.';
+        const flowButtons: Record<string, unknown>[] = [];
+
+        if (fpClient?.intakeCompleted) {
+          const fpChecklist = getDocumentChecklist(fpClientId);
+          if (fpChecklist) {
+            const collected = fpChecklist.documents.filter((d: { collected: boolean }) => d.collected).length;
+            const total = fpChecklist.documents.length;
+            flowScreen = 'document_checklist';
+            flowMessage = `Intake complete. Documents: ${collected}/${total} collected.`;
+            flowButtons.push({
+              type: 'button', label: '📋 View Checklist', variant: 'primary', icon: '📋',
+              action: { type: 'tool_call', tool: 'generate_document_checklist', toolName: 'generate_document_checklist', parameters: { clientId: fpClientId } },
+            });
+          }
+          flowButtons.push({
+            type: 'button', label: '👨‍💼 Match Tax Pro', variant: 'secondary', icon: '👨‍💼',
+            action: { type: 'tool_call', tool: 'route_to_tax_pro', toolName: 'route_to_tax_pro', parameters: { clientId: fpClientId } },
+          });
+        } else {
+          flowScreen = 'home';
+          flowButtons.push({
+            type: 'button', label: '🚀 Start Guided Intake', variant: 'primary', icon: '🚀',
+            action: { type: 'tool_call', tool: 'start_intake', toolName: 'start_intake', parameters: {} },
+          });
+        }
+
+        const flowUI: Record<string, unknown> = {
+          id: `flow-${Date.now()}`,
+          screen: flowScreen,
+          components: [
+            { type: 'text_block', text: 'Flow Progress', style: 'heading' },
+            { type: 'text_block', text: flowMessage, style: 'body' },
+            ...flowButtons,
+          ],
+          stateUpdates: { screen: flowScreen },
+          data: { clientId: fpClientId },
+          _meta: { toolName: name, timestamp: new Date().toISOString() },
+        };
+        return { content: [{ type: 'text', text: flowMessage }], structuredContent: flowUI };
       }
 
       default:
