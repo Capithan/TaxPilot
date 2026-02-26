@@ -596,7 +596,8 @@ function sendMessage(text) {
 function callTool(toolName, args) {
   // Try window.openai.callTool first (Apps SDK compat)
   if (window.openai && typeof window.openai.callTool === 'function') {
-    return window.openai.callTool(toolName, args || {});
+    // Apps SDK uses an object signature: { name, arguments }
+    return window.openai.callTool({ name: toolName, arguments: args || {} });
   }
   // Fallback to MCP Apps JSON-RPC bridge
   return rpcRequest('tools/call', { name: toolName, arguments: args || {} });
