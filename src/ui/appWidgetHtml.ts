@@ -12,7 +12,7 @@
  *   4. Widget JS reads data and renders HRB-branded components
  */
 
-export const APP_WIDGET_MIME_TYPE = 'text/html+skybridge';
+export const APP_WIDGET_MIME_TYPE = 'text/html;profile=mcp-app';
 
 export function getAppWidgetHtml(): string {
   return `<!DOCTYPE html>
@@ -600,10 +600,24 @@ function sendMessage(text) {
 
 /** Call an MCP tool from the widget via the bridge */
 function callTool(toolName, args) {
-  // Try window.openai.callTool first (Apps SDK compat)
+  // Prefer Apps SDK bridge when available.
+  // Current signature: callTool(name, args)
+  // Legacy compatibility: callTool({ name, arguments })
   if (window.openai && typeof window.openai.callTool === 'function') {
-    // Apps SDK uses an object signature: { name, arguments }
-    return window.openai.callTool({ name: toolName, arguments: args || {} });
+    return Promise.resolve()
+      .then(function() {
+        return window.openai.callTool(toolName, args || {});
+      })
+      .catch(function(primaryErr) {
+        return Promise.resolve()
+          .then(function() {
+            return window.openai.callTool({ name: toolName, arguments: args || {} });
+          })
+          .catch(function(legacyErr) {
+            console.warn('[TaxPilot] window.openai.callTool failed in both signatures; falling back to MCP JSON-RPC.', primaryErr, legacyErr);
+            return rpcRequest('tools/call', { name: toolName, arguments: args || {} });
+          });
+      });
   }
   // Fallback to MCP Apps JSON-RPC bridge
   return rpcRequest('tools/call', { name: toolName, arguments: args || {} });
