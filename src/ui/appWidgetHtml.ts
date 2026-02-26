@@ -12,7 +12,7 @@
  *   4. Widget JS reads data and renders HRB-branded components
  */
 
-export const APP_WIDGET_MIME_TYPE = 'text/html;profile=mcp-app';
+export const APP_WIDGET_MIME_TYPE = 'text/html+skybridge';
 
 export function getAppWidgetHtml(): string {
   return `<!DOCTYPE html>
@@ -628,15 +628,31 @@ function openExternal(href) {
 // ─── Generic tool call + re-render helper ──────────────────────────────────
 function callToolAndRender(toolName, params, btn, origLabel) {
   if (btn) { btn.disabled = true; btn.textContent = 'Working\u2026'; }
+  var isOpenAiHost = !!(window.openai && typeof window.openai.callTool === 'function');
   callTool(toolName, params).then(function(result) {
-    var data = result?.structuredContent ?? result?.result?.structuredContent ?? result;
-    if (data) { render(data); updateModelContext('User progressed via ' + toolName); }
+    // In ChatGPT Skybridge, callTool resolves with { result: string } (text summary).
+    // The structured UI data arrives via openai:set_globals event, which our listener handles.
+    // In MCP Apps bridge mode, the result contains structuredContent directly.
+    if (isOpenAiHost) {
+      // ChatGPT: openai:set_globals listener handles the re-render.
+      // Also check if toolOutput was already updated synchronously.
+      var toolOutput = window.openai?.toolOutput;
+      if (toolOutput) render(toolOutput);
+    } else {
+      var data = result?.structuredContent ?? result?.result?.structuredContent ?? result;
+      if (data) { render(data); }
+    }
+    updateModelContext('User progressed via ' + toolName);
     if (btn) { btn.disabled = false; btn.textContent = origLabel; }
   }).catch(function(err) {
     console.error('[TaxPilot] Tool call failed:', toolName, err);
     if (btn) { btn.disabled = false; btn.textContent = origLabel; }
     // Fallback: send as chat message so the LLM can still handle it
-    sendMessage('Please run ' + toolName + ' with ' + JSON.stringify(params));
+    if (isOpenAiHost && window.openai?.sendFollowUpMessage) {
+      window.openai.sendFollowUpMessage({ prompt: 'Please run ' + toolName + ' with ' + JSON.stringify(params) });
+    } else {
+      sendMessage('Please run ' + toolName + ' with ' + JSON.stringify(params));
+    }
   });
 }
 
