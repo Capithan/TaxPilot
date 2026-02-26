@@ -280,6 +280,18 @@ function renderStatusBadge(c) {
   return '<span class="tp-badge tp-badge--' + (c.variant || 'info') + '">' + icon + esc(c.text) + '</span>';
 }
 
+// Normalize action to handle both naming conventions:
+// components.builders uses {toolName, toolArgs}, intake.ts uses {tool, parameters}
+function normalizeAction(act) {
+  if (!act) return null;
+  if (act.type !== 'tool_call') return act;
+  return {
+    type: act.type,
+    tool: act.tool || act.toolName,
+    parameters: act.parameters || act.toolArgs || {}
+  };
+}
+
 function renderFormGroup(c) {
   var fid = 'form-' + (++_formId);
   const title = c.title ? '<div class="tp-form-title">' + esc(c.title) + '</div>' : '';
@@ -302,7 +314,13 @@ function renderFormGroup(c) {
   var footer = c.submitLabel
     ? '<button class="tp-btn tp-btn--primary tp-btn--lg tp-btn-submit" data-form-submit="' + fid + '">' + esc(c.submitLabel) + '</button>'
     : '<div class="tp-form-note">\\uD83D\\uDCAC Answer in the chat to continue</div>';
-  return '<div class="tp-form-group" data-form-id="' + fid + '">' + title + subtitle + '<div class="tp-form-fields">' + fields + '</div>' + footer + '</div>';
+  // Embed the tool_call action as data attribute so click handler can call the tool directly
+  var actionAttr = '';
+  var nAct = normalizeAction(c.action);
+  if (nAct && nAct.type === 'tool_call' && nAct.tool) {
+    actionAttr = ' data-form-action="' + JSON.stringify(nAct).replace(/"/g, '&quot;') + '"';
+  }
+  return '<div class="tp-form-group" data-form-id="' + fid + '"' + actionAttr + '>' + title + subtitle + '<div class="tp-form-fields">' + fields + '</div>' + footer + '</div>';
 }
 
 function renderSelectionCard(c) {
@@ -311,9 +329,22 @@ function renderSelectionCard(c) {
     const icon = opt.icon ? '<span class="tp-sopt-icon">' + opt.icon + '</span>' : '';
     const badge = opt.badge ? '<span class="tp-sopt-badge">' + esc(opt.badge) + '</span>' : '';
     const desc = opt.description ? '<div class="tp-sopt-desc">' + esc(opt.description) + '</div>' : '';
-    return '<div class="tp-sopt" data-select-option="' + esc(opt.label) + '">' + icon + '<div class="tp-sopt-text"><div class="tp-sopt-label">' + esc(opt.label) + badge + '</div>' + desc + '</div></div>';
+    var valAttr = ' data-select-value="' + esc(opt.value || opt.id || opt.label) + '"';
+    // Per-option action: if the option has its own action, embed it so the click handler can call the right tool
+    var optActionAttr = '';
+    var nOptAct = normalizeAction(opt.action);
+    if (nOptAct && nOptAct.type === 'tool_call' && nOptAct.tool) {
+      optActionAttr = ' data-select-action="' + JSON.stringify(nOptAct).replace(/"/g, '&quot;') + '"';
+    }
+    return '<div class="tp-sopt" data-select-option="' + esc(opt.label) + '"' + valAttr + optActionAttr + '>' + icon + '<div class="tp-sopt-text"><div class="tp-sopt-label">' + esc(opt.label) + badge + '</div>' + desc + '</div></div>';
   }).join('');
-  return '<div class="tp-sel">' + title + '<div class="tp-sel-options">' + options + '</div></div>';
+  // Embed the tool_call action on the wrapper so click handler can call the tool directly
+  var selActionAttr = '';
+  var nSelAct = normalizeAction(c.action);
+  if (nSelAct && nSelAct.type === 'tool_call' && nSelAct.tool) {
+    selActionAttr = ' data-sel-action="' + JSON.stringify(nSelAct).replace(/"/g, '&quot;') + '"';
+  }
+  return '<div class="tp-sel"' + selActionAttr + '>' + title + '<div class="tp-sel-options">' + options + '</div></div>';
 }
 
 function renderMultiSelect(c) {
@@ -324,12 +355,19 @@ function renderMultiSelect(c) {
     const icon = opt.icon ? '<span class="tp-mopt-icon">' + opt.icon + '</span>' : '';
     const desc = opt.description ? '<div class="tp-mopt-desc">' + esc(opt.description) + '</div>' : '';
     const badge = opt.badge ? '<span class="tp-mopt-badge">' + esc(opt.badge) + '</span>' : '';
-    return '<div class="tp-mopt" data-multi-option="' + esc(opt.label) + '"><div class="tp-mopt-header">' + icon + '<div class="tp-mopt-text"><div class="tp-mopt-label">' + esc(opt.label) + badge + '</div>' + desc + '</div><div class="tp-mopt-check"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div></div></div>';
+    var mValAttr = opt.value ? ' data-multi-value="' + esc(opt.value) + '"' : '';
+    return '<div class="tp-mopt" data-multi-option="' + esc(opt.label) + '"' + mValAttr + '><div class="tp-mopt-header">' + icon + '<div class="tp-mopt-text"><div class="tp-mopt-label">' + esc(opt.label) + badge + '</div>' + desc + '</div><div class="tp-mopt-check"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div></div></div>';
   }).join('');
+  // Embed tool_call action on the wrapper for direct tool invocation
+  var multiActionAttr = '';
+  var nMultiAct = normalizeAction(c.action);
+  if (nMultiAct && nMultiAct.type === 'tool_call' && nMultiAct.tool) {
+    multiActionAttr = ' data-multi-action="' + JSON.stringify(nMultiAct).replace(/"/g, '&quot;') + '"';
+  }
   var submitBtn = c.submitLabel
     ? '<button class="tp-btn tp-btn--primary tp-btn--lg tp-btn-submit" data-multi-submit="' + mid + '">' + esc(c.submitLabel) + '</button>'
     : '<button class="tp-btn tp-btn--primary tp-btn-submit" data-multi-submit="' + mid + '">Continue \u2192</button>';
-  return '<div class="tp-multisel" data-multi-id="' + mid + '">' + title + subtitle + '<div class="tp-multisel-options">' + options + '</div>' + submitBtn + '</div>';
+  return '<div class="tp-multisel" data-multi-id="' + mid + '"' + multiActionAttr + '>' + title + subtitle + '<div class="tp-multisel-options">' + options + '</div>' + submitBtn + '</div>';
 }
 
 function renderInfoCard(c) {
@@ -350,9 +388,10 @@ function renderButton(c) {
   const sizeCls = c.size === 'sm' ? 'tp-btn--sm' : c.size === 'lg' ? 'tp-btn--lg' : '';
   const icon = c.icon ? '<span class="tp-btn-icon">' + c.icon + '</span>' : '';
   // If action is a tool_call, wire up direct tool invocation via the bridge
-  if (c.action && c.action.type === 'tool_call' && c.action.tool) {
-    var params = JSON.stringify(c.action.parameters || {}).replace(/"/g, '&quot;');
-    return '<button class="tp-btn ' + cls + ' ' + sizeCls + '" data-btn-tool="' + esc(c.action.tool) + '" data-btn-params="' + params + '" data-btn-msg="Call ' + esc(c.action.tool) + '" style="border:none">' + icon + '<span>' + esc(c.label) + '</span></button>';
+  var nBtnAct = normalizeAction(c.action);
+  if (nBtnAct && nBtnAct.type === 'tool_call' && nBtnAct.tool) {
+    var params = JSON.stringify(nBtnAct.parameters || {}).replace(/"/g, '&quot;');
+    return '<button class="tp-btn ' + cls + ' ' + sizeCls + '" data-btn-tool="' + esc(nBtnAct.tool) + '" data-btn-params="' + params + '" data-btn-msg="Call ' + esc(nBtnAct.tool) + '" style="border:none">' + icon + '<span>' + esc(c.label) + '</span></button>';
   }
   // Otherwise, send a follow-up message
   var actionMsg = c.label || '';
@@ -586,15 +625,49 @@ function openExternal(href) {
   window.open(href, '_blank');
 }
 
+// ─── Generic tool call + re-render helper ──────────────────────────────────
+function callToolAndRender(toolName, params, btn, origLabel) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Working\u2026'; }
+  callTool(toolName, params).then(function(result) {
+    var data = result?.structuredContent ?? result?.result?.structuredContent ?? result;
+    if (data) { render(data); updateModelContext('User progressed via ' + toolName); }
+    if (btn) { btn.disabled = false; btn.textContent = origLabel; }
+  }).catch(function(err) {
+    console.error('[TaxPilot] Tool call failed:', toolName, err);
+    if (btn) { btn.disabled = false; btn.textContent = origLabel; }
+    // Fallback: send as chat message so the LLM can still handle it
+    sendMessage('Please run ' + toolName + ' with ' + JSON.stringify(params));
+  });
+}
+
 // ─── Event Delegation (interactive forms, selections, buttons) ──────────────
 document.getElementById('content').addEventListener('click', function(e) {
   var t = e.target;
   while (t && t !== this) {
-    // Form submit button
+    // Form submit button — call tool directly with formData merged into params
     if (t.dataset && t.dataset.formSubmit) {
       var formEl = document.querySelector('[data-form-id="' + t.dataset.formSubmit + '"]');
       if (formEl) {
         var inputs = formEl.querySelectorAll('.tp-input');
+        var formData = {};
+        inputs.forEach(function(inp) {
+          var fieldId = inp.dataset.fieldId || '';
+          var val = inp.value?.trim();
+          if (fieldId && val) formData[fieldId] = val;
+        });
+        if (Object.keys(formData).length === 0) return;
+        var actionStr = formEl.dataset.formAction;
+        if (actionStr) {
+          try {
+            var action = JSON.parse(actionStr);
+            if (action.tool) {
+              var params = Object.assign({}, action.parameters || {}, { formData: formData });
+              callToolAndRender(action.tool, params, t, t.textContent);
+              return;
+            }
+          } catch(ex) {}
+        }
+        // Fallback: send as chat message
         var parts = [];
         inputs.forEach(function(inp) {
           var lbl = inp.closest('.tp-field');
@@ -603,15 +676,42 @@ document.getElementById('content').addEventListener('click', function(e) {
           if (labelText && val) parts.push(labelText + ': ' + val);
         });
         if (parts.length > 0) {
-          t.disabled = true; t.textContent = 'Sending…';
+          t.disabled = true; t.textContent = 'Sending\u2026';
           sendMessage(parts.join(', '));
         }
       }
       return;
     }
-    // Selection card option click
+    // Selection card option click — call tool directly with selection value
     if (t.dataset && t.dataset.selectOption) {
-      sendMessage(t.dataset.selectOption);
+      var selItem = t.closest('[data-select-option]') || t;
+      var selValue = selItem.dataset.selectValue || selItem.dataset.selectOption;
+      // 1. Check per-option action first (each option can have its own tool)
+      if (selItem.dataset.selectAction) {
+        try {
+          var optAction = JSON.parse(selItem.dataset.selectAction);
+          if (optAction.tool) {
+            selItem.style.pointerEvents = 'none'; selItem.style.opacity = '0.6';
+            var optParams = Object.assign({}, optAction.parameters || {}, { selection: selValue });
+            callToolAndRender(optAction.tool, optParams, null, null);
+            return;
+          }
+        } catch(ex) {}
+      }
+      // 2. Fall back to card-level action
+      var selWrapper = selItem.closest('[data-sel-action]');
+      if (selWrapper && selWrapper.dataset.selAction) {
+        try {
+          var selAction = JSON.parse(selWrapper.dataset.selAction);
+          if (selAction.tool) {
+            selItem.style.pointerEvents = 'none'; selItem.style.opacity = '0.6';
+            var selParams = Object.assign({}, selAction.parameters || {}, { selection: selValue });
+            callToolAndRender(selAction.tool, selParams, null, null);
+            return;
+          }
+        } catch(ex) {}
+      }
+      sendMessage(selValue);
       return;
     }
     // Multi-select toggle
@@ -620,17 +720,28 @@ document.getElementById('content').addEventListener('click', function(e) {
       mopt.classList.toggle('tp-mopt--selected');
       return;
     }
-    // Multi-select submit
+    // Multi-select submit — call tool directly with selections array
     if (t.dataset && t.dataset.multiSubmit) {
       var container = document.querySelector('[data-multi-id="' + t.dataset.multiSubmit + '"]');
       if (container) {
         var selected = container.querySelectorAll('.tp-mopt--selected');
-        var labels = [];
-        selected.forEach(function(el) { labels.push(el.dataset.multiOption || el.querySelector('.tp-mopt-label')?.textContent?.trim()); });
-        if (labels.length > 0) {
-          t.disabled = true; t.textContent = 'Sending…';
-          sendMessage(labels.join(', '));
+        var values = [];
+        selected.forEach(function(el) { values.push(el.dataset.multiValue || el.dataset.multiOption || el.querySelector('.tp-mopt-label')?.textContent?.trim()); });
+        if (values.length === 0) return;
+        var multiActionStr = container.dataset.multiAction;
+        if (multiActionStr) {
+          try {
+            var multiAction = JSON.parse(multiActionStr);
+            if (multiAction.tool) {
+              var multiParams = Object.assign({}, multiAction.parameters || {}, { selections: values });
+              callToolAndRender(multiAction.tool, multiParams, t, t.textContent);
+              return;
+            }
+          } catch(ex) {}
         }
+        // Fallback: send as message
+        t.disabled = true; t.textContent = 'Sending\u2026';
+        sendMessage(values.join(', '));
       }
       return;
     }
@@ -639,17 +750,7 @@ document.getElementById('content').addEventListener('click', function(e) {
       var toolName = t.dataset.btnTool;
       var toolParams = {};
       try { toolParams = JSON.parse(t.dataset.btnParams || '{}'); } catch(e) {}
-      t.disabled = true;
-      var origLabel = t.textContent;
-      t.textContent = 'Working\u2026';
-      callTool(toolName, toolParams).then(function(result) {
-        var data = result?.structuredContent ?? result?.result?.structuredContent ?? result;
-        if (data) { render(data); updateModelContext('User clicked: ' + toolName); }
-        t.disabled = false; t.textContent = origLabel;
-      }).catch(function() {
-        t.disabled = false; t.textContent = origLabel;
-        sendMessage(t.dataset.btnMsg || toolName);
-      });
+      callToolAndRender(toolName, toolParams, t, t.textContent);
       return;
     }
     // Button with message
@@ -660,6 +761,24 @@ document.getElementById('content').addEventListener('click', function(e) {
     t = t.parentElement;
   }
 });
+
+// ─── MCP Apps Bridge Initialization ──────────────────────────────────────────
+// Per https://developers.openai.com/apps-sdk/build/chatgpt-ui/#use-the-mcp-apps-bridge-recommended
+var _bridgeReady = (function initializeBridge() {
+  function rpcNotify(method, params) {
+    window.parent.postMessage({ jsonrpc: '2.0', method: method, params: params || {} }, '*');
+  }
+  return rpcRequest('ui/initialize', {
+    appInfo: { name: 'taxpilot-widget', version: '1.0.0' },
+    appCapabilities: {},
+    protocolVersion: '2026-01-26',
+  }).then(function() {
+    rpcNotify('ui/notifications/initialized', {});
+    console.log('[TaxPilot] MCP Apps bridge initialized.');
+  }).catch(function(err) {
+    console.warn('[TaxPilot] MCP Apps bridge init skipped (standalone mode):', err);
+  });
+})();
 
 // ─── Data Sources ────────────────────────────────────────────────────────────
 

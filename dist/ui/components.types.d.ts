@@ -96,6 +96,8 @@ export interface SelectionCardComponent {
         description?: string;
         icon?: string;
         badge?: string;
+        /** Per-option action override — when set, clicking this option calls this action instead of the card-level action */
+        action?: UIActionPayload;
     }>;
     action: UIActionPayload;
 }
@@ -298,10 +300,14 @@ export interface StatCardComponent {
 export interface UIActionPayload {
     /** The type of action to perform */
     type: 'tool_call' | 'send_message' | 'navigate' | 'set_input' | 'submit_form';
-    /** MCP tool name (for tool_call) */
+    /** MCP tool name (for tool_call) — canonical field */
     toolName?: string;
+    /** MCP tool name (alias for toolName, used by intake formatter) */
+    tool?: string;
     /** Arguments for the tool */
     toolArgs?: Record<string, unknown>;
+    /** Arguments for the tool (alias for toolArgs, used by intake formatter) */
+    parameters?: Record<string, unknown>;
     /** Message to send (for send_message) */
     message?: string;
     /** Screen to navigate to (for navigate) */

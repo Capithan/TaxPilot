@@ -36,11 +36,11 @@ export function formatWelcomeScreen(): StructuredUIResponse {
       { id: 'reminders', label: 'Reminders', status: 'upcoming' },
     ], 0))
     .add(selectionCard('What do you want to do?', [
-      { id: 'start_intake', label: 'Start guided intake', description: 'Collect everything in one flow', icon: '🧭', badge: 'Recommended' },
-      { id: 'documents', label: 'See my document list', description: 'Personalized checklist and reminders', icon: '📋' },
-      { id: 'routing', label: 'Match me to a tax pro', description: 'Get the right expert for your situation', icon: '👩‍💼' },
+      { id: 'start_intake', label: 'Start guided intake', description: 'Collect everything in one flow', icon: '🧭', badge: 'Recommended', action: toolAction('start_intake') },
+      { id: 'documents', label: 'See my document list', description: 'Personalized checklist and reminders', icon: '📋', action: toolAction('generate_document_checklist') },
+      { id: 'routing', label: 'Match me to a tax pro', description: 'Get the right expert for your situation', icon: '👩‍💼', action: toolAction('route_to_tax_pro') },
       { id: 'questions', label: 'Ask a quick question', description: 'Chat without starting intake', icon: '💬' },
-    ], messageAction('Start my guided tax intake'))) // message gives the model a clear intent
+    ], toolAction('start_intake'))) // default card-level action; per-option actions override for each option
     .add(infoCard('Built-in guardrails', [
       { label: 'Flow aware', value: '10-stage flow with progress', icon: '🧭' },
       { label: 'UI-first', value: 'Structured cards and forms', icon: '🧩' },
