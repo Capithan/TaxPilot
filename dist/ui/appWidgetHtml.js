@@ -796,13 +796,23 @@ var _bridgeReady = (function initializeBridge() {
 
 // ─── Data Sources ────────────────────────────────────────────────────────────
 
-// 1. Initial data from window.openai.toolOutput (set before script runs)
-render(window.openai?.toolOutput);
+// 1. Initial data from window.openai.toolOutput (set by ChatGPT before script runs)
+if (window.openai && window.openai.toolOutput) {
+  console.log('[TaxPilot] Initial toolOutput found, rendering.');
+  render(window.openai.toolOutput);
+} else {
+  console.log('[TaxPilot] No initial toolOutput — waiting for openai:set_globals or message event.');
+}
 
 // 2. Listen for updates via openai:set_globals event
-window.addEventListener('openai:set_globals', function(event) {
-  const data = event.detail?.globals?.toolOutput ?? window.openai?.toolOutput;
-  if (data) render(data);
+// Per the kitchen-sink-lite reference: the event is just a notification;
+// always read the current value from window.openai directly.
+window.addEventListener('openai:set_globals', function() {
+  var data = window.openai && window.openai.toolOutput;
+  if (data) {
+    console.log('[TaxPilot] openai:set_globals fired — re-rendering with new toolOutput.');
+    render(data);
+  }
 }, { passive: true });
 
 // 3. Listen for MCP Apps bridge notifications AND JSON-RPC responses

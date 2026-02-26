@@ -412,18 +412,11 @@ app.get('/api/tools', (_req, res) => {
     res.json(mcpTools);
 });
 // ── MCP Apps Widget Resource URI ────────────────────────────────────────────
-// Version the URI path itself (not just query string) to bust ChatGPT's template cache.
-// Bump this whenever the widget HTML/JS/CSS changes.
-const WIDGET_VERSION = 'v4';
-const WIDGET_RESOURCE_URI_BASE = `ui://taxpilot/widget-${WIDGET_VERSION}.html`;
-// Official MIME type per https://developers.openai.com/apps-sdk/build/mcp-server
+// STATIC URI — must be identical across tools/list, tools/call, resources/list,
+// and resources/read so ChatGPT reuses the same widget iframe and updates
+// window.openai.toolOutput in-place instead of creating new widgets.
+const WIDGET_RESOURCE_URI = 'ui://taxpilot/widget.html';
 const WIDGET_MIME_TYPE = APP_WIDGET_MIME_TYPE;
-/** Get the current widget resource URI (versioned so ChatGPT fetches fresh HTML after each tool call) */
-function getWidgetResourceUri() {
-    return toolResultVersion > 0
-        ? `${WIDGET_RESOURCE_URI_BASE}?v=${toolResultVersion}`
-        : WIDGET_RESOURCE_URI_BASE;
-}
 /**
  * Build the widget HTML for resources/read.
  * Returns a GENERIC JavaScript-powered template that receives tool data
@@ -433,22 +426,18 @@ function getWidgetResourceUri() {
 function readWidgetHtml() {
     return getAppWidgetHtml();
 }
-// ── Tool descriptor meta — matches OpenAI Apps SDK Skybridge format ─────────
-// Required fields per github.com/openai/openai-apps-sdk-examples:
+// ── Tool descriptor meta — matches OpenAI kitchen-sink-lite reference ────────
+// Per github.com/openai/openai-apps-sdk-examples/kitchen_sink_server_node:
 //   'openai/outputTemplate'          → URI of the widget resource (binds tool to widget)
 //   'openai/toolInvocation/invoking' → loading message shown while tool runs
 //   'openai/toolInvocation/invoked'  → completion message shown when done
 //   'openai/widgetAccessible'        → true = widget can call this tool back
-const URI = WIDGET_RESOURCE_URI_BASE;
 function toolMeta(invoking, invoked) {
     return {
-        'openai/outputTemplate': URI,
+        'openai/outputTemplate': WIDGET_RESOURCE_URI,
         'openai/toolInvocation/invoking': invoking,
         'openai/toolInvocation/invoked': invoked,
         'openai/widgetAccessible': true,
-        // MCP Apps compatibility aliases
-        ui: { resourceUri: URI },
-        'ui/resourceUri': URI,
     };
 }
 const mcpTools = [
@@ -758,22 +747,12 @@ function handleMcpPost(req, res) {
             latestToolResult = toolResult.structuredContent;
             toolResultVersion++;
         }
-        // Per Apps SDK spec: tool call _meta must carry invocation labels + output template
-        // Also include ui.resourceUri with VERSIONED URI so ChatGPT re-fetches fresh pre-rendered HTML
-        const versionedUri = getWidgetResourceUri();
+        // Use the tool's own _meta (static outputTemplate URI) so ChatGPT
+        // updates toolOutput on the existing widget instead of creating a new one.
         const calledTool = mcpTools.find(t => t.name === toolName);
-        const invocationMeta = calledTool ? {
-            'openai/outputTemplate': versionedUri,
-            'openai/toolInvocation/invoking': calledTool._meta['openai/toolInvocation/invoking'],
-            'openai/toolInvocation/invoked': calledTool._meta['openai/toolInvocation/invoked'],
-            'openai/widgetAccessible': true,
-            ui: { resourceUri: versionedUri },
-            'ui/resourceUri': versionedUri,
-        } : {
-            'openai/outputTemplate': versionedUri,
-            ui: { resourceUri: versionedUri },
-            'ui/resourceUri': versionedUri,
-        };
+        const invocationMeta = calledTool
+            ? { ...calledTool._meta, invocation: toolName }
+            : { 'openai/outputTemplate': WIDGET_RESOURCE_URI, 'openai/widgetAccessible': true, invocation: toolName };
         const response = {
             ...toolResult,
             _meta: invocationMeta,
@@ -796,12 +775,10 @@ function handleMcpPost(req, res) {
                 resources: [{
                         name: 'TaxPilot Widget',
                         title: 'TaxPilot — H&R Block Tax Assistant',
-                        uri: WIDGET_RESOURCE_URI_BASE,
+                        uri: WIDGET_RESOURCE_URI,
                         mimeType: WIDGET_MIME_TYPE,
                         description: 'H&R Block TaxPilot interactive UI widget — renders intake forms, document checklists, tax pro cards, and appointment summaries.',
-                        _meta: {
-                            ui: { prefersBorder: true },
-                        },
+                        _meta: toolMeta('Rendering TaxPilot…', 'TaxPilot ready'),
                     }]
             }
         });
@@ -817,10 +794,10 @@ function handleMcpPost(req, res) {
                 resourceTemplates: [{
                         name: 'TaxPilot Widget',
                         title: 'TaxPilot — H&R Block Tax Assistant',
-                        uriTemplate: WIDGET_RESOURCE_URI_BASE,
+                        uriTemplate: WIDGET_RESOURCE_URI,
                         mimeType: WIDGET_MIME_TYPE,
                         description: 'H&R Block TaxPilot interactive UI widget',
-                        _meta: { ui: { prefersBorder: true } },
+                        _meta: toolMeta('Rendering TaxPilot…', 'TaxPilot ready'),
                     }]
             }
         });
@@ -830,7 +807,7 @@ function handleMcpPost(req, res) {
     if (method === 'resources/read') {
         const uri = params?.uri || '';
         // Accept base URI or any versioned variant (ui://taxpilot/widget.html?v=N)
-        if (uri.startsWith(WIDGET_RESOURCE_URI_BASE)) {
+        if (uri.startsWith(WIDGET_RESOURCE_URI)) {
             try {
                 const html = readWidgetHtml();
                 res.setHeader('Content-Type', 'application/json');
@@ -1007,29 +984,21 @@ app.post('/messages', (req, res) => {
             };
             break;
         case 'tools/call': {
-            const legacyToolResult = handleToolCall(params.name, params.arguments || {});
-            if (legacyToolResult.structuredContent) {
-                latestToolResult = legacyToolResult.structuredContent;
+            const toolResult = handleToolCall(params.name, params.arguments || {});
+            if (toolResult.structuredContent) {
+                latestToolResult = toolResult.structuredContent;
                 toolResultVersion++;
             }
-            const legacyVersionedUri = getWidgetResourceUri();
-            const legacyTool = mcpTools.find(t => t.name === params.name);
-            const legacyMeta = legacyTool ? {
-                'openai/outputTemplate': legacyVersionedUri,
-                'openai/toolInvocation/invoking': legacyTool._meta['openai/toolInvocation/invoking'],
-                'openai/toolInvocation/invoked': legacyTool._meta['openai/toolInvocation/invoked'],
-                'openai/widgetAccessible': true,
-                ui: { resourceUri: legacyVersionedUri },
-                'ui/resourceUri': legacyVersionedUri,
-            } : {
-                'openai/outputTemplate': legacyVersionedUri,
-                ui: { resourceUri: legacyVersionedUri },
-                'ui/resourceUri': legacyVersionedUri,
-            };
+            // Use the tool's own _meta (static outputTemplate URI), matching
+            // the kitchen-sink-lite reference implementation exactly.
+            const toolDef = mcpTools.find(t => t.name === params.name);
+            const responseMeta = toolDef
+                ? { ...toolDef._meta, invocation: params.name }
+                : { 'openai/outputTemplate': WIDGET_RESOURCE_URI, 'openai/widgetAccessible': true, invocation: params.name };
             response = {
                 jsonrpc: '2.0',
                 id,
-                result: { ...legacyToolResult, _meta: legacyMeta }
+                result: { ...toolResult, _meta: responseMeta }
             };
             break;
         }
@@ -1041,10 +1010,10 @@ app.post('/messages', (req, res) => {
                     resources: [{
                             name: 'TaxPilot Widget',
                             title: 'TaxPilot — H&R Block Tax Assistant',
-                            uri: WIDGET_RESOURCE_URI_BASE,
+                            uri: WIDGET_RESOURCE_URI,
                             mimeType: WIDGET_MIME_TYPE,
                             description: 'H&R Block TaxPilot interactive UI widget',
-                            _meta: { ui: { prefersBorder: true } },
+                            _meta: toolMeta('Rendering TaxPilot…', 'TaxPilot ready'),
                         }]
                 }
             };
@@ -1058,10 +1027,10 @@ app.post('/messages', (req, res) => {
                     resourceTemplates: [{
                             name: 'TaxPilot Widget',
                             title: 'TaxPilot — H&R Block Tax Assistant',
-                            uriTemplate: WIDGET_RESOURCE_URI_BASE,
+                            uriTemplate: WIDGET_RESOURCE_URI,
                             mimeType: WIDGET_MIME_TYPE,
                             description: 'H&R Block TaxPilot interactive UI widget',
-                            _meta: { ui: { prefersBorder: true } },
+                            _meta: toolMeta('Rendering TaxPilot…', 'TaxPilot ready'),
                         }]
                 }
             };
@@ -1069,7 +1038,7 @@ app.post('/messages', (req, res) => {
         case 'resources/read': {
             const readUri = params?.uri || '';
             // Accept base URI or any versioned variant (ui://taxpilot/widget.html?v=N)
-            if (readUri.startsWith(WIDGET_RESOURCE_URI_BASE)) {
+            if (readUri.startsWith(WIDGET_RESOURCE_URI)) {
                 try {
                     const html = readWidgetHtml();
                     response = {
