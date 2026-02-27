@@ -498,10 +498,14 @@ const WIDGET_MIME_TYPE = APP_WIDGET_MIME_TYPE;
  * Build the widget HTML for resources/read.
  * Returns a GENERIC JavaScript-powered template that receives tool data
  * via the MCP Apps bridge (window.openai.toolOutput + postMessage).
- * Per https://developers.openai.com/apps-sdk/build/chatgpt-ui/
+ * Injects the server URL so the widget can call the REST API as fallback.
  */
-function readWidgetHtml(): string {
-  return getAppWidgetHtml();
+function readWidgetHtml(serverUrl?: string): string {
+  let html = getAppWidgetHtml();
+  if (serverUrl) {
+    html = html.replace('data-server-url=""', 'data-server-url="' + serverUrl + '"');
+  }
+  return html;
 }
 
 // ── Tool descriptor meta — matches OpenAI kitchen-sink-lite reference ────────
@@ -937,7 +941,10 @@ function handleMcpPost(req: Request, res: Response) {
     // Accept base URI or any versioned variant (ui://taxpilot/widget.html?v=N)
     if (uri.startsWith(WIDGET_RESOURCE_URI)) {
       try {
-        const html = readWidgetHtml();
+        const proto = req.get('x-forwarded-proto') || req.protocol || 'https';
+        const host = req.get('host') || 'localhost:8000';
+        const serverUrl = proto + '://' + host;
+        const html = readWidgetHtml(serverUrl);
         res.setHeader('Content-Type', 'application/json');
         res.json({
           jsonrpc: '2.0',
@@ -1189,7 +1196,10 @@ app.post('/messages', (req: Request, res: Response) => {
       // Accept base URI or any versioned variant (ui://taxpilot/widget.html?v=N)
       if (readUri.startsWith(WIDGET_RESOURCE_URI)) {
         try {
-          const html = readWidgetHtml();
+          const proto = req.get('x-forwarded-proto') || req.protocol || 'https';
+          const host = req.get('host') || 'localhost:8000';
+          const sseServerUrl = proto + '://' + host;
+          const html = readWidgetHtml(sseServerUrl);
           response = {
             jsonrpc: '2.0',
             id,

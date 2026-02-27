@@ -219,7 +219,7 @@ body {
 .tp-banner[data-confetti="true"] { animation: confetti-pop 0.5s ease-out; }
 </style>
 </head>
-<body>
+<body data-server-url="">
 <div id="widget-root">
   <div id="content" class="tp-structured">
     <div class="tp-loading">
@@ -585,6 +585,8 @@ function render(data) {
 // ─── Bridge Helpers ──────────────────────────────────────────────────────────
 var _rpcId = 0;
 var _rpcCallbacks = {};
+var _serverUrl = document.body.getAttribute('data-server-url') || '';
+var _pendingRender = false;
 
 /** Send a JSON-RPC 2.0 request to the host and return a promise for the result */
 function rpcRequest(method, params) {
@@ -592,7 +594,6 @@ function rpcRequest(method, params) {
     var id = ++_rpcId;
     _rpcCallbacks[id] = { resolve: resolve, reject: reject };
     window.parent.postMessage({ jsonrpc: '2.0', id: id, method: method, params: params || {} }, '*');
-    // Timeout after 15 seconds
     setTimeout(function() {
       if (_rpcCallbacks[id]) { delete _rpcCallbacks[id]; reject(new Error('RPC timeout: ' + method)); }
     }, 15000);
@@ -600,150 +601,146 @@ function rpcRequest(method, params) {
 }
 
 /** Send a follow-up message to the ChatGPT conversation */
-function sendMessage(text) {
-  window.parent.postMessage({ jsonrpc: '2.0', method: 'ui/message', params: { role: 'user', content: [{ type: 'text', text: text }] } }, '*');
+function sendFollowUp(text) {
+  if (window.openai && typeof window.openai.sendFollowUpMessage === 'function') {
+    window.openai.sendFollowUpMessage({ prompt: text });
+  } else {
+    window.parent.postMessage({ jsonrpc: '2.0', method: 'ui/message', params: { role: 'user', content: [{ type: 'text', text: text }] } }, '*');
+  }
 }
 
-/** Call an MCP tool from the widget via the bridge */
-function callTool(toolName, args) {
-  // Prefer Apps SDK bridge when available (per OpenAI docs)
+// ── Tier 1: MCP Apps bridge callTool ─────────────────────────────────────────
+function bridgeCallTool(toolName, args) {
   if (window.openai && typeof window.openai.callTool === 'function') {
     try {
       var p = window.openai.callTool(toolName, args || {});
-      // Ensure we always return a promise
       if (p && typeof p.then === 'function') return p;
       return Promise.resolve(p);
     } catch (e) {
-      console.warn('[TaxPilot] window.openai.callTool threw synchronously:', e);
-      // Fall through to RPC bridge
+      return Promise.reject(e);
     }
   }
-  // Fallback to MCP Apps JSON-RPC bridge (postMessage to parent)
-  return rpcRequest('tools/call', { name: toolName, arguments: args || {} });
+  return Promise.reject(new Error('bridge unavailable'));
 }
 
-/** Update model-visible context when UI state changes */
-function updateModelContext(text) {
-  rpcRequest('ui/update-model-context', { content: [{ type: 'text', text: text }] }).catch(function() {});
+// ── Tier 2: Direct REST call to server ───────────────────────────────────────
+function restCallTool(toolName, args) {
+  if (!_serverUrl) return Promise.reject(new Error('no server URL'));
+  return fetch(_serverUrl + '/api/tools/call', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: toolName, args: args || {} }),
+  }).then(function(resp) {
+    if (!resp.ok) throw new Error('REST ' + resp.status);
+    return resp.json();
+  });
 }
 
-/** Request a display mode change (inline, fullscreen, pip) */
-function requestDisplayMode(mode) {
-  if (window.openai && typeof window.openai.requestDisplayMode === 'function') {
-    return window.openai.requestDisplayMode({ mode: mode });
-  }
-  return rpcRequest('ui/request-display-mode', { mode: mode });
+// ── Tier 3: sendFollowUpMessage ──────────────────────────────────────────────
+function modelCallTool(toolName, args) {
+  sendFollowUp('Please call the tool ' + toolName + ' with arguments: ' + JSON.stringify(args));
 }
 
-/** Open an external link via the host */
-function openExternal(href) {
-  if (window.openai && typeof window.openai.openExternal === 'function') {
-    return window.openai.openExternal({ href: href });
-  }
-  window.open(href, '_blank');
+// ── Unified callTool — tries bridge → REST → model ──────────────────────────
+function callTool(toolName, args) {
+  // Try the Apps SDK bridge first (2.5s timeout)
+  return new Promise(function(resolve, reject) {
+    var settled = false;
+    function settle(val) { if (!settled) { settled = true; resolve(val); } }
+    function fail(err) { if (!settled) { settled = true; reject(err); } }
+
+    bridgeCallTool(toolName, args).then(function(res) {
+      console.log('[TP] bridge OK for', toolName);
+      settle(res);
+    }).catch(function(e1) {
+      console.warn('[TP] bridge failed:', e1.message || e1, '— trying REST');
+      restCallTool(toolName, args).then(function(res) {
+        console.log('[TP] REST OK for', toolName);
+        settle(res);
+      }).catch(function(e2) {
+        console.warn('[TP] REST failed:', e2.message || e2);
+        fail(e2);
+      });
+    });
+
+    // Hard timeout: if bridge doesn't resolve in 4s, try REST in parallel
+    setTimeout(function() {
+      if (settled) return;
+      console.warn('[TP] bridge timeout — trying REST in parallel');
+      restCallTool(toolName, args).then(settle).catch(function() {});
+    }, 4000);
+  });
 }
 
-// ─── Generic tool call + re-render helper ──────────────────────────────────
-var _pendingRender = false; // Flag: are we waiting for a tool result to render?
+// ── Extract renderable data from any response shape ──────────────────────────
+function extractRenderData(result) {
+  if (!result || typeof result !== 'object') return null;
+  // { structuredContent: { components, … } }
+  var sc = result.structuredContent;
+  if (sc && typeof sc === 'object' && (sc.components || sc.screen || sc.type)) return sc;
+  // { result: { structuredContent: { … } } }
+  var rsc = result.result && result.result.structuredContent;
+  if (rsc && typeof rsc === 'object' && (rsc.components || rsc.screen || rsc.type)) return rsc;
+  // Direct component data
+  if (result.components || result.screen || result.type || result.title) return result;
+  return null;
+}
 
+// ── callToolAndRender — show loading, call tool, render result ───────────────
 function callToolAndRender(toolName, params, btn, origLabel) {
   if (btn) { btn.disabled = true; btn.textContent = 'Working\u2026'; }
   _pendingRender = true;
 
-  // Show a loading indicator in the content area so the user sees feedback
   var contentEl = document.getElementById('content');
-  var prevHtml = contentEl ? contentEl.innerHTML : '';
   if (contentEl) {
     contentEl.insertAdjacentHTML('beforeend',
       '<div id="tp-loading-overlay" style="text-align:center;padding:24px;color:var(--hrb-text-muted)">'
       + '<div style="font-size:24px;margin-bottom:8px">\u23F3</div>'
-      + '<div style="font-size:14px">Processing ' + esc(toolName.replace(/_/g, ' ')) + '\u2026</div>'
-      + '</div>');
+      + '<div style="font-size:14px">Processing ' + esc(toolName.replace(/_/g, ' ')) + '\u2026</div></div>');
   }
 
-  function cleanupLoading() {
+  function done(data) {
+    _pendingRender = false;
     var overlay = document.getElementById('tp-loading-overlay');
     if (overlay) overlay.remove();
-  }
-
-  function restoreBtn() {
+    if (data) {
+      render(data);
+      var root = document.getElementById('widget-root');
+      if (root) root.scrollTop = 0;
+    }
     if (btn && btn.parentNode) { btn.disabled = false; btn.textContent = origLabel; }
   }
 
-  function tryRender(data) {
-    if (data && (data.components || data.screen || data.type || data.title)) {
-      _pendingRender = false;
-      cleanupLoading();
-      render(data);
-      // Scroll to top of widget so user sees the new content
-      var root = document.getElementById('widget-root');
-      if (root) root.scrollTop = 0;
-      return true;
-    }
-    return false;
-  }
-
   callTool(toolName, params).then(function(result) {
-    console.log('[TaxPilot] callTool resolved for', toolName, typeof result);
-
-    // 1. Standard: { structuredContent: { components, screen, … } }
-    if (result && result.structuredContent && tryRender(result.structuredContent)) {
-      restoreBtn();
-      updateModelContext('User progressed via ' + toolName);
-      return;
-    }
-    // 2. Nested result wrapper
-    if (result && result.result && result.result.structuredContent && tryRender(result.result.structuredContent)) {
-      restoreBtn();
-      updateModelContext('User progressed via ' + toolName);
-      return;
-    }
-    // 3. Raw structured content at top level
-    if (result && typeof result === 'object' && tryRender(result)) {
-      restoreBtn();
-      updateModelContext('User progressed via ' + toolName);
-      return;
-    }
-    // 4. Check toolOutput (may have been updated by ChatGPT already)
-    if (window.openai && window.openai.toolOutput && tryRender(window.openai.toolOutput)) {
-      restoreBtn();
-      updateModelContext('User progressed via ' + toolName);
-      return;
-    }
-
-    // 5. If nothing rendered yet, wait briefly for openai:set_globals to fire
-    console.log('[TaxPilot] No immediate render data — waiting for set_globals event');
+    console.log('[TP] callTool resolved for', toolName, typeof result);
+    var data = extractRenderData(result);
+    if (data) { done(data); return; }
+    // Check toolOutput (ChatGPT may have updated it via set_globals)
+    var to = window.openai && window.openai.toolOutput;
+    if (to && extractRenderData(to)) { done(extractRenderData(to)); return; }
+    // Wait briefly for set_globals
+    console.log('[TP] No render data yet — waiting for set_globals');
     setTimeout(function() {
-      if (!_pendingRender) return; // Already rendered by set_globals listener
-      // Last check: maybe toolOutput was updated
-      if (window.openai && window.openai.toolOutput && tryRender(window.openai.toolOutput)) {
-        restoreBtn();
-        updateModelContext('User progressed via ' + toolName);
-        return;
-      }
-      // Still nothing — send as chat message so the model can handle it
-      console.warn('[TaxPilot] No render data after timeout — sending follow-up message');
-      cleanupLoading();
-      _pendingRender = false;
-      restoreBtn();
-      if (window.openai && typeof window.openai.sendFollowUpMessage === 'function') {
-        window.openai.sendFollowUpMessage({ prompt: 'Run ' + toolName + ' with parameters: ' + JSON.stringify(params) });
-      } else {
-        sendMessage('Please run ' + toolName + ' with ' + JSON.stringify(params));
-      }
+      if (!_pendingRender) return;
+      var to2 = window.openai && window.openai.toolOutput;
+      if (to2 && extractRenderData(to2)) { done(extractRenderData(to2)); return; }
+      // Last resort: ask model
+      console.warn('[TP] Timeout — falling back to sendFollowUp');
+      done(null);
+      modelCallTool(toolName, params);
     }, 3000);
-
   }).catch(function(err) {
-    console.error('[TaxPilot] Tool call failed:', toolName, err);
-    cleanupLoading();
-    _pendingRender = false;
-    restoreBtn();
-    // Fallback: ask the model to run the tool via chat
-    if (window.openai && typeof window.openai.sendFollowUpMessage === 'function') {
-      window.openai.sendFollowUpMessage({ prompt: 'Run ' + toolName + ' with parameters: ' + JSON.stringify(params) });
-    } else {
-      sendMessage('Please run ' + toolName + ' with ' + JSON.stringify(params));
-    }
+    console.error('[TP] callTool error:', toolName, err);
+    // Try REST one more time as last resort
+    restCallTool(toolName, params).then(function(result) {
+      var data = extractRenderData(result);
+      if (data) { done(data); return; }
+      done(null);
+      modelCallTool(toolName, params);
+    }).catch(function() {
+      done(null);
+      modelCallTool(toolName, params);
+    });
   });
 }
 
@@ -815,7 +812,7 @@ document.getElementById('content').addEventListener('click', function(e) {
         });
         if (parts.length > 0) {
           t.disabled = true; t.textContent = 'Sending\u2026';
-          sendMessage(parts.join(', '));
+          sendFollowUp(parts.join(', '));
         }
       }
       return;
@@ -849,7 +846,7 @@ document.getElementById('content').addEventListener('click', function(e) {
           }
         } catch(ex) {}
       }
-      sendMessage(selValue);
+      sendFollowUp(selValue);
       return;
     }
     // Multi-select toggle
@@ -879,7 +876,7 @@ document.getElementById('content').addEventListener('click', function(e) {
         }
         // Fallback: send as message
         t.disabled = true; t.textContent = 'Sending\u2026';
-        sendMessage(values.join(', '));
+        sendFollowUp(values.join(', '));
       }
       return;
     }
@@ -893,7 +890,7 @@ document.getElementById('content').addEventListener('click', function(e) {
     }
     // Button with message
     if (t.dataset && t.dataset.btnMsg) {
-      sendMessage(t.dataset.btnMsg);
+      sendFollowUp(t.dataset.btnMsg);
       return;
     }
     t = t.parentElement;
@@ -932,13 +929,16 @@ if (window.openai && window.openai.toolOutput) {
 // Per the kitchen-sink-lite reference: the event is just a notification;
 // always read the current value from window.openai directly.
 window.addEventListener('openai:set_globals', function() {
-  var data = window.openai && window.openai.toolOutput;
+  var raw = window.openai && window.openai.toolOutput;
+  var data = raw ? (extractRenderData(raw) || raw) : null;
   if (data) {
-    console.log('[TaxPilot] openai:set_globals fired — re-rendering with new toolOutput.');
-    _pendingRender = false; // Cancel any pending timeout fallback
+    console.log('[TP] set_globals fired — re-rendering');
+    _pendingRender = false;
     var overlay = document.getElementById('tp-loading-overlay');
     if (overlay) overlay.remove();
     render(data);
+    var root = document.getElementById('widget-root');
+    if (root) root.scrollTop = 0;
   }
 }, { passive: true });
 
@@ -959,12 +959,17 @@ window.addEventListener('message', function(event) {
 
   // MCP Apps bridge notifications
   if (message.method === 'ui/notifications/tool-result') {
-    const data = (message.params && message.params.structuredContent) ? message.params.structuredContent : message.params;
-    if (data) render(data);
+    var ndata = (message.params && message.params.structuredContent) ? message.params.structuredContent : message.params;
+    var renderData = extractRenderData(ndata) || ndata;
+    if (renderData) {
+      _pendingRender = false;
+      var ov = document.getElementById('tp-loading-overlay');
+      if (ov) ov.remove();
+      render(renderData);
+    }
   }
   if (message.method === 'ui/notifications/tool-input') {
-    // Tool input received — can be used to pre-fill forms if needed
-    console.log('[TaxPilot] Tool input received:', message.params);
+    console.log('[TP] Tool input received:', message.params);
   }
 }, { passive: true });
 </script>
