@@ -74,7 +74,7 @@ function personalInfoUI(sessionId) {
             { type: 'form_field', id: 'lastName', label: 'Last Name', fieldType: 'text', placeholder: 'Smith', required: true },
             { type: 'form_field', id: 'email', label: 'Email Address', fieldType: 'email', placeholder: 'john.smith@email.com', required: true },
             { type: 'form_field', id: 'phone', label: 'Phone Number', fieldType: 'phone', placeholder: '(555) 123-4567', required: true },
-            { type: 'form_field', id: 'dateOfBirth', label: 'Date of Birth', fieldType: 'date', required: true },
+            { type: 'form_field', id: 'dateOfBirth', label: 'Date of Birth', fieldType: 'date', placeholder: 'MM/DD/YYYY', helperText: 'Enter as MM/DD/YYYY', required: true },
             { type: 'form_field', id: 'address', label: 'Current Address', fieldType: 'textarea', placeholder: '123 Main St, City, State, ZIP', rows: 2, required: true },
         ],
         submitLabel: 'Continue →',

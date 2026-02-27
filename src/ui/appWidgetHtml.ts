@@ -588,7 +588,234 @@ var _rpcId = 0;
 var _rpcCallbacks = {};
 var _serverUrl = (typeof __TP_SERVER_URL__ !== 'undefined' && __TP_SERVER_URL__) || document.body.getAttribute('data-server-url') || '';
 var _pendingRender = false;
-console.log('[TP] init: serverUrl=' + _serverUrl + ', openai=' + (typeof window.openai) + ', callTool=' + (window.openai && typeof window.openai.callTool));
+
+// ─── Multi-Step Intake Wizard (fully local navigation) ──────────────────────
+// All step definitions are embedded so the widget never depends on server
+// round-trips for UI transitions. Data is saved to the server in the background.
+var _sessionId = '';
+var _clientId = '';
+var _stepIndex = 0;
+var _collected = {};   // { stepId: { formData/selection/selections } }
+var _wizardActive = false;
+
+var STEPS = [
+  { id: 'personal_info', title: 'Personal Information', type: 'form',
+    desc: 'We need some basic information to get started with your tax return.',
+    fields: [
+      { id: 'firstName', label: 'First Name', fieldType: 'text', placeholder: 'John', required: true },
+      { id: 'lastName', label: 'Last Name', fieldType: 'text', placeholder: 'Smith', required: true },
+      { id: 'email', label: 'Email Address', fieldType: 'email', placeholder: 'john.smith@email.com', required: true },
+      { id: 'phone', label: 'Phone Number', fieldType: 'phone', placeholder: '(555) 123-4567', required: true },
+      { id: 'dateOfBirth', label: 'Date of Birth', fieldType: 'date', placeholder: 'MM/DD/YYYY', helperText: 'Enter as MM/DD/YYYY', required: true },
+      { id: 'address', label: 'Current Address', fieldType: 'textarea', placeholder: '123 Main St, City, State, ZIP', rows: 2, required: true }
+    ] },
+  { id: 'filing_status', title: 'Filing Status', type: 'select',
+    question: 'What is your filing status?',
+    options: [
+      { value: 'single', label: 'Single', icon: '\uD83D\uDC64', description: 'Unmarried or legally separated' },
+      { value: 'married_filing_jointly', label: 'Married Filing Jointly', icon: '\uD83D\uDC6B', description: 'Married and filing a combined return' },
+      { value: 'married_filing_separately', label: 'Married Filing Separately', icon: '\uD83D\uDCCB', description: 'Married but filing individual returns' },
+      { value: 'head_of_household', label: 'Head of Household', icon: '\uD83C\uDFE0', description: 'Unmarried and paying more than half the cost of maintaining a home' },
+      { value: 'qualifying_widow_widower', label: 'Qualifying Widow(er)', icon: '\uD83D\uDD4A\uFE0F', description: 'Spouse died within the last two years and have a dependent child' }
+    ] },
+  { id: 'dependents', title: 'Dependents', type: 'select',
+    question: 'Do you have any dependents?',
+    options: [
+      { value: 'yes', label: 'Yes, I have dependents', icon: '\uD83D\uDC68\u200D\uD83D\uDC69\u200D\uD83D\uDC67\u200D\uD83D\uDC66', description: 'Children, elderly parents, or other qualifying individuals' },
+      { value: 'no', label: 'No dependents', icon: '\uD83D\uDC64', description: 'No qualifying dependents to claim' }
+    ] },
+  { id: 'employment', title: 'Employment', type: 'select',
+    question: 'What is your employment situation?',
+    options: [
+      { value: 'employed_w2', label: 'Employed (W-2)', icon: '\uD83C\uDFE2', description: 'Traditional employee with W-2 income' },
+      { value: 'self_employed_1099', label: 'Self-Employed (1099)', icon: '\uD83D\uDCBC', description: 'Freelancer, contractor, or business owner' },
+      { value: 'both', label: 'Both W-2 and 1099', icon: '\uD83D\uDCCA', description: 'Mix of employment and self-employment income' },
+      { value: 'unemployed', label: 'Unemployed', icon: '\uD83D\uDD0D', description: 'Currently not employed' },
+      { value: 'retired', label: 'Retired', icon: '\uD83C\uDFD6\uFE0F', description: 'Retired with pension or retirement income' }
+    ] },
+  { id: 'income_types', title: 'Income Types', type: 'multi',
+    question: 'Select all income types that apply to you:',
+    options: [
+      { value: 'wages', label: 'Wages & Salary (W-2)', icon: '\uD83D\uDCB0' },
+      { value: 'self_employment', label: 'Self-Employment Income', icon: '\uD83D\uDCBC' },
+      { value: 'investments', label: 'Investment Income', icon: '\uD83D\uDCC8' },
+      { value: 'rental', label: 'Rental Income', icon: '\uD83C\uDFD8\uFE0F' },
+      { value: 'retirement', label: 'Retirement Distributions', icon: '\uD83C\uDFE6' },
+      { value: 'social_security', label: 'Social Security', icon: '\uD83C\uDFDB\uFE0F' },
+      { value: 'other_income', label: 'Other Income', icon: '\uD83D\uDCCB' }
+    ] },
+  { id: 'deductions', title: 'Deductions', type: 'multi',
+    question: 'Select deductions that may apply to you:',
+    options: [
+      { value: 'mortgage_interest', label: 'Mortgage Interest', icon: '\uD83C\uDFE0' },
+      { value: 'state_local_taxes', label: 'State & Local Taxes', icon: '\uD83D\uDCCB' },
+      { value: 'charitable', label: 'Charitable Contributions', icon: '\u2764\uFE0F' },
+      { value: 'medical', label: 'Medical Expenses', icon: '\uD83C\uDFE5' },
+      { value: 'education', label: 'Education Expenses', icon: '\uD83C\uDF93' },
+      { value: 'home_office', label: 'Home Office', icon: '\uD83D\uDDA5\uFE0F' },
+      { value: 'business_expenses', label: 'Business Expenses', icon: '\uD83D\uDCBC' },
+      { value: 'none', label: 'None / Standard Deduction', icon: '\u2705' }
+    ] },
+  { id: 'special_situations', title: 'Special Situations', type: 'multi',
+    question: 'Do any of these special situations apply to you?',
+    options: [
+      { value: 'health_insurance', label: 'Health Insurance (ACA)', icon: '\uD83C\uDFE5' },
+      { value: 'cryptocurrency', label: 'Cryptocurrency Transactions', icon: '\u20BF' },
+      { value: 'foreign_accounts', label: 'Foreign Bank Accounts', icon: '\uD83C\uDF0D' },
+      { value: 'rental_property', label: 'Rental Property', icon: '\uD83C\uDFD8\uFE0F' },
+      { value: 'business_income', label: 'Business Income', icon: '\uD83C\uDFEA' },
+      { value: 'life_changes', label: 'Major Life Changes', icon: '\uD83D\uDD04' },
+      { value: 'none', label: 'None of the Above', icon: '\u2705' }
+    ] },
+  { id: 'review', title: 'Review & Submit', type: 'review' }
+];
+
+/** Build the component array for a given step index */
+function buildStepUI(idx) {
+  var step = STEPS[idx];
+  var total = STEPS.length;
+  var comps = [];
+
+  // Step progress bar
+  comps.push({ type: 'step_progress', steps: STEPS.map(function(s, i) {
+    return { id: s.id, label: s.title, status: i < idx ? 'done' : i === idx ? 'active' : 'upcoming' };
+  })});
+  comps.push({ type: 'progress_bar', value: idx, max: total, label: 'Step ' + (idx + 1) + ' of ' + total });
+  comps.push({ type: 'text_block', text: 'Step ' + (idx + 1) + ': ' + step.title, style: 'heading' });
+  if (idx > 0) {
+    comps.push({ type: 'banner', text: '\u2705 Step completed! Moving to ' + step.title + '.', variant: 'success', icon: '\u2705' });
+  } else {
+    comps.push({ type: 'banner', text: 'Welcome to TaxPilot! Let\\'s collect your tax information step by step.', variant: 'info', icon: '\uD83D\uDE80' });
+  }
+
+  if (step.type === 'form') {
+    comps.push({ type: 'form_group', title: 'Tell us about yourself', description: step.desc,
+      fields: step.fields.map(function(f) { return Object.assign({ type: 'form_field' }, f); }),
+      submitLabel: 'Continue \u2192',
+      action: { type: 'tool_call', tool: 'process_intake_response', parameters: { sessionId: _sessionId, step: step.id } }
+    });
+  } else if (step.type === 'select') {
+    comps.push({ type: 'selection_card', title: step.question,
+      options: step.options.map(function(o) {
+        return { value: o.value, label: o.label, icon: o.icon, description: o.description,
+          action: { type: 'tool_call', tool: 'process_intake_response', parameters: { sessionId: _sessionId, step: step.id } }
+        };
+      }),
+      action: { type: 'tool_call', tool: 'process_intake_response', parameters: { sessionId: _sessionId, step: step.id } }
+    });
+  } else if (step.type === 'multi') {
+    comps.push({ type: 'multi_select', title: step.question,
+      options: step.options, submitLabel: 'Continue \u2192',
+      action: { type: 'tool_call', tool: 'process_intake_response', parameters: { sessionId: _sessionId, step: step.id } }
+    });
+  } else if (step.type === 'review') {
+    comps = comps.concat(buildReviewComponents());
+  }
+  return { screen: 'intake', components: comps };
+}
+
+/** Build review step components from collected data */
+function buildReviewComponents() {
+  var parts = [];
+  parts.push({ type: 'banner', text: 'Please review your information below before submitting.', variant: 'info', icon: '\uD83D\uDCCB' });
+  var items = [];
+  var pinfo = (_collected['personal_info'] || {}).formData || {};
+  if (pinfo.firstName) items.push({ text: 'Name: ' + pinfo.firstName + ' ' + (pinfo.lastName || ''), status: 'done', icon: '\u2705' });
+  if (pinfo.email) items.push({ text: 'Email: ' + pinfo.email, status: 'done', icon: '\u2705' });
+  if (pinfo.phone) items.push({ text: 'Phone: ' + pinfo.phone, status: 'done', icon: '\u2705' });
+  var fs = (_collected['filing_status'] || {}).selection;
+  if (fs) items.push({ text: 'Filing Status: ' + fs.replace(/_/g, ' '), status: 'done', icon: '\u2705' });
+  var dep = (_collected['dependents'] || {}).selection;
+  if (dep) items.push({ text: 'Dependents: ' + dep, status: 'done', icon: '\u2705' });
+  var emp = (_collected['employment'] || {}).selection;
+  if (emp) items.push({ text: 'Employment: ' + emp.replace(/_/g, ' '), status: 'done', icon: '\u2705' });
+  var inc = (_collected['income_types'] || {}).selections;
+  if (inc && inc.length) items.push({ text: 'Income: ' + inc.join(', '), status: 'done', icon: '\u2705' });
+  var ded = (_collected['deductions'] || {}).selections;
+  if (ded && ded.length) items.push({ text: 'Deductions: ' + ded.join(', '), status: 'done', icon: '\u2705' });
+  var spec = (_collected['special_situations'] || {}).selections;
+  if (spec && spec.length) items.push({ text: 'Special: ' + spec.join(', '), status: 'done', icon: '\u2705' });
+  parts.push({ type: 'checklist', title: 'Your Information', icon: '\uD83D\uDCDD', counter: { done: items.length, total: items.length }, items: items });
+  parts.push({ type: 'button', label: '\u2705 Confirm & Get Document Checklist', variant: 'primary', size: 'lg',
+    action: { type: 'tool_call', tool: '_local_complete', parameters: {} } });
+  return parts;
+}
+
+/** Build the completion screen shown after review */
+function buildCompleteUI() {
+  var comps = [];
+  comps.push({ type: 'banner', text: '\uD83C\uDF89 Congratulations! Your tax intake is complete!', variant: 'success', icon: '\uD83C\uDF89', confetti: true });
+  comps.push({ type: 'text_block', text: 'Intake Complete', style: 'heading' });
+  comps.push({ type: 'text_block', text: 'Your information has been submitted. A tax professional will be matched to your profile.', style: 'body' });
+  // Document checklist (basic — server will have the full one)
+  var docs = [];
+  var emp = (_collected['employment'] || {}).selection || '';
+  if (emp === 'employed_w2' || emp === 'both') docs.push({ text: 'W-2 Forms', status: 'required', icon: '\u26A0\uFE0F', description: 'From each employer' });
+  if (emp === 'self_employed_1099' || emp === 'both') docs.push({ text: '1099 Forms', status: 'required', icon: '\u26A0\uFE0F', description: 'For freelance/contract income' });
+  docs.push({ text: 'Government-issued Photo ID', status: 'required', icon: '\u26A0\uFE0F' });
+  docs.push({ text: 'Social Security Card / ITIN', status: 'required', icon: '\u26A0\uFE0F' });
+  docs.push({ text: 'Prior Year Tax Return', status: 'required', icon: '\u26A0\uFE0F' });
+  var inc = (_collected['income_types'] || {}).selections || [];
+  if (inc.indexOf('investments') >= 0) docs.push({ text: '1099-B / 1099-DIV (investments)', status: 'required', icon: '\u26A0\uFE0F' });
+  if (inc.indexOf('rental') >= 0) docs.push({ text: 'Rental Income/Expense Records', status: 'required', icon: '\u26A0\uFE0F' });
+  var ded = (_collected['deductions'] || {}).selections || [];
+  if (ded.indexOf('mortgage_interest') >= 0) docs.push({ text: '1098 Mortgage Interest Statement', status: 'required', icon: '\u26A0\uFE0F' });
+  if (ded.indexOf('charitable') >= 0) docs.push({ text: 'Charitable Donation Receipts', status: 'required', icon: '\u26A0\uFE0F' });
+  if (ded.indexOf('medical') >= 0) docs.push({ text: 'Medical Expense Records', status: 'required', icon: '\u26A0\uFE0F' });
+  comps.push({ type: 'checklist', title: 'Required Documents', icon: '\uD83D\uDCC4', counter: { done: 0, total: docs.length }, items: docs });
+  // Try to fetch tax pro match from server and show it if available
+  comps.push({ type: 'banner', text: 'A matching tax professional will be assigned to you shortly.', variant: 'info', icon: '\uD83D\uDC68\u200D\uD83D\uDCBC' });
+  if (_clientId) {
+    comps.push({ type: 'button', label: '\uD83D\uDC68\u200D\uD83D\uDCBC Find My Tax Pro', variant: 'primary', size: 'lg',
+      action: { type: 'tool_call', tool: 'match_tax_pro', parameters: { clientId: _clientId } } });
+    comps.push({ type: 'button', label: '\uD83D\uDCC4 Generate Full Document Checklist', variant: 'secondary', size: 'lg',
+      action: { type: 'tool_call', tool: 'generate_document_checklist', parameters: { clientId: _clientId } } });
+  }
+  return { screen: 'complete', components: comps };
+}
+
+/** Save step data to server (fire-and-forget, non-blocking) */
+function saveStepToServer(stepId, data) {
+  if (!_serverUrl || !_sessionId) return;
+  var args = { sessionId: _sessionId, step: stepId };
+  if (data.formData) args.formData = data.formData;
+  if (data.selection) args.selection = data.selection;
+  if (data.selections) args.selections = data.selections;
+  fetch(_serverUrl + '/api/tools/call', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'process_intake_response', args: args })
+  }).then(function(r) { console.log('[TP] Saved', stepId, 'status:', r.status); })
+    .catch(function(e) { console.warn('[TP] Save failed for', stepId, e.message); });
+}
+
+/** Advance to next step locally — called by click handlers */
+function advanceStep(stepId, data) {
+  // Store collected data
+  _collected[stepId] = data;
+  // Save to server in the background (non-blocking)
+  saveStepToServer(stepId, data);
+  // Move to next step
+  _stepIndex++;
+  if (_stepIndex < STEPS.length) {
+    render(buildStepUI(_stepIndex));
+  } else {
+    // All steps done — show completion
+    render(buildCompleteUI());
+  }
+  // Scroll to top
+  var root = document.getElementById('widget-root');
+  if (root) root.scrollTop = 0;
+}
+
+/** Start the local wizard (called on init or when sessionId is obtained) */
+function startWizard(sessionId, clientId, startAtStep) {
+  _sessionId = sessionId || '';
+  _clientId = clientId || '';
+  _wizardActive = true;
+  _stepIndex = startAtStep || 0;
+  render(buildStepUI(_stepIndex));
+}
 
 /** Send a JSON-RPC 2.0 request to the host and return a promise for the result */
 function rpcRequest(method, params) {
@@ -822,6 +1049,11 @@ document.getElementById('content').addEventListener('click', function(e) {
           try {
             var action = JSON.parse(actionStr);
             if (action.tool) {
+              // Wizard intercept: handle intake steps locally
+              if (_wizardActive && action.tool === 'process_intake_response' && action.parameters && action.parameters.step) {
+                advanceStep(action.parameters.step, { formData: formData });
+                return;
+              }
               var params = Object.assign({}, action.parameters || {}, { formData: formData });
               callToolAndRender(action.tool, params, t, origLabel);
               return;
@@ -853,6 +1085,12 @@ document.getElementById('content').addEventListener('click', function(e) {
         try {
           var optAction = JSON.parse(selItem.dataset.selectAction);
           if (optAction.tool) {
+            // Wizard intercept: handle intake steps locally
+            if (_wizardActive && optAction.tool === 'process_intake_response' && optAction.parameters && optAction.parameters.step) {
+              selItem.style.pointerEvents = 'none'; selItem.style.opacity = '0.6';
+              advanceStep(optAction.parameters.step, { selection: selValue });
+              return;
+            }
             selItem.style.pointerEvents = 'none'; selItem.style.opacity = '0.6';
             var optParams = Object.assign({}, optAction.parameters || {}, { selection: selValue });
             callToolAndRender(optAction.tool, optParams, null, null);
@@ -866,6 +1104,12 @@ document.getElementById('content').addEventListener('click', function(e) {
         try {
           var selAction = JSON.parse(selWrapper.dataset.selAction);
           if (selAction.tool) {
+            // Wizard intercept: handle intake steps locally
+            if (_wizardActive && selAction.tool === 'process_intake_response' && selAction.parameters && selAction.parameters.step) {
+              selItem.style.pointerEvents = 'none'; selItem.style.opacity = '0.6';
+              advanceStep(selAction.parameters.step, { selection: selValue });
+              return;
+            }
             selItem.style.pointerEvents = 'none'; selItem.style.opacity = '0.6';
             var selParams = Object.assign({}, selAction.parameters || {}, { selection: selValue });
             callToolAndRender(selAction.tool, selParams, null, null);
@@ -895,6 +1139,11 @@ document.getElementById('content').addEventListener('click', function(e) {
           try {
             var multiAction = JSON.parse(multiActionStr);
             if (multiAction.tool) {
+              // Wizard intercept: handle intake steps locally
+              if (_wizardActive && multiAction.tool === 'process_intake_response' && multiAction.parameters && multiAction.parameters.step) {
+                advanceStep(multiAction.parameters.step, { selections: values });
+                return;
+              }
               var multiParams = Object.assign({}, multiAction.parameters || {}, { selections: values });
               callToolAndRender(multiAction.tool, multiParams, t, t.textContent);
               return;
@@ -909,10 +1158,19 @@ document.getElementById('content').addEventListener('click', function(e) {
     }
     // Button with tool_call action — call the tool directly via bridge
     if (t.dataset && t.dataset.btnTool) {
-      var toolName = t.dataset.btnTool;
-      var toolParams = {};
-      try { toolParams = JSON.parse(t.dataset.btnParams || '{}'); } catch(e) {}
-      callToolAndRender(toolName, toolParams, t, t.textContent);
+      var btnTool = t.dataset.btnTool;
+      var btnParams = {};
+      try { btnParams = JSON.parse(t.dataset.btnParams || '{}'); } catch(e) {}
+      // Wizard intercept: _local_complete shows the completion screen
+      if (_wizardActive && btnTool === '_local_complete') {
+        render(buildCompleteUI());
+        var root = document.getElementById('widget-root');
+        if (root) root.scrollTop = 0;
+        // Also do a final save to server
+        saveStepToServer('review', { formData: _collected });
+        return;
+      }
+      callToolAndRender(btnTool, btnParams, t, t.textContent);
       return;
     }
     // Button with message
@@ -944,23 +1202,72 @@ var _bridgeReady = (function initializeBridge() {
 
 // ─── Data Sources ────────────────────────────────────────────────────────────
 
-// 1. Initial data from window.openai.toolOutput (set by ChatGPT before script runs)
-if (window.openai && window.openai.toolOutput) {
-  console.log('[TaxPilot] Initial toolOutput found, rendering.');
-  render(window.openai.toolOutput);
-} else {
-  console.log('[TaxPilot] No initial toolOutput — waiting for openai:set_globals or message event.');
-}
+// Initialize wizard: extract sessionId from toolOutput or REST, then start wizard.
+(function initWizard() {
+  var to = window.openai && window.openai.toolOutput;
+  var sid = '';
+  var cid = '';
+  if (to) {
+    // Try extracting sessionId/clientId from initial toolOutput
+    sid = (to.stateUpdates && to.stateUpdates.sessionId) || (to.data && to.data.sessionId) || '';
+    cid = (to.stateUpdates && to.stateUpdates.clientId) || (to.data && to.data.clientId) || '';
+    // Also check structuredContent wrapper
+    if (!sid && to.structuredContent) {
+      var sc = to.structuredContent;
+      sid = (sc.stateUpdates && sc.stateUpdates.sessionId) || (sc.data && sc.data.sessionId) || '';
+      cid = (sc.stateUpdates && sc.stateUpdates.clientId) || (sc.data && sc.data.clientId) || '';
+    }
+  }
+  console.log('[TP] initWizard: sid=' + sid + ', cid=' + cid + ', hasToolOutput=' + !!to + ', serverUrl=' + _serverUrl);
+
+  // Start wizard immediately with whatever we have (instant UI)
+  startWizard(sid, cid, 0);
+
+  // If no sessionId, try REST in background to get one
+  if (!sid && _serverUrl) {
+    restCallTool('start_intake', {}).then(function(resp) {
+      var rsid = '';
+      var rcid = '';
+      if (resp.stateUpdates) { rsid = resp.stateUpdates.sessionId || ''; rcid = resp.stateUpdates.clientId || ''; }
+      if (!rsid && resp.data) { rsid = resp.data.sessionId || ''; rcid = resp.data.clientId || ''; }
+      if (!rsid && resp.structuredContent && resp.structuredContent.stateUpdates) {
+        rsid = resp.structuredContent.stateUpdates.sessionId || '';
+        rcid = resp.structuredContent.stateUpdates.clientId || '';
+      }
+      if (rsid) {
+        _sessionId = rsid;
+        _clientId = rcid || _clientId;
+        console.log('[TP] Got sessionId from REST:', rsid);
+      }
+    }).catch(function(e) { console.warn('[TP] REST start_intake failed:', e.message || e); });
+  }
+})();
 
 // 2. Listen for updates via openai:set_globals event
-// Per the kitchen-sink-lite reference: the event is just a notification;
-// always read the current value from window.openai directly.
+// When wizard is active: only extract sessionId, don't re-render intake steps.
+// When _pendingRender is true (non-intake tool call in progress): render normally.
 window.addEventListener('openai:set_globals', function() {
   var raw = window.openai && window.openai.toolOutput;
-  console.log('[TP] set_globals fired, toolOutput type=' + typeof raw + ', keys=' + (raw ? Object.keys(raw).join(',') : 'null') + ', pendingRender=' + _pendingRender);
+  console.log('[TP] set_globals fired, wizardActive=' + _wizardActive + ', pendingRender=' + _pendingRender);
+
+  // Always extract sessionId/clientId if we don't have one yet
+  if (raw && !_sessionId) {
+    var sid = '';
+    var cid = '';
+    if (raw.stateUpdates) { sid = raw.stateUpdates.sessionId || ''; cid = raw.stateUpdates.clientId || ''; }
+    if (!sid && raw.data) { sid = raw.data.sessionId || ''; cid = raw.data.clientId || ''; }
+    if (sid) { _sessionId = sid; _clientId = cid || _clientId; console.log('[TP] Got sessionId from set_globals:', sid); }
+  }
+
+  // If wizard is active and no pending non-intake render, skip re-render
+  if (_wizardActive && !_pendingRender) {
+    console.log('[TP] set_globals: wizard active, skipping re-render');
+    return;
+  }
+
+  // Render the data (for non-intake tool results or pre-wizard mode)
   var data = raw ? (extractRenderData(raw) || raw) : null;
   if (data) {
-    console.log('[TP] set_globals: rendering data with keys=' + Object.keys(data).join(','));
     _pendingRender = false;
     var overlay = document.getElementById('tp-loading-overlay');
     if (overlay) overlay.remove();
@@ -987,6 +1294,17 @@ window.addEventListener('message', function(event) {
 
   // MCP Apps bridge notifications
   if (message.method === 'ui/notifications/tool-result') {
+    // If wizard is active and not waiting for a non-intake tool, skip to avoid overwriting wizard UI
+    if (_wizardActive && !_pendingRender) {
+      console.log('[TP] tool-result notification received but wizard active — skipping');
+      // Still extract sessionId if available
+      var trData = (message.params && message.params.structuredContent) ? message.params.structuredContent : message.params;
+      if (trData && !_sessionId) {
+        var trsid = (trData.stateUpdates && trData.stateUpdates.sessionId) || (trData.data && trData.data.sessionId) || '';
+        if (trsid) { _sessionId = trsid; console.log('[TP] Got sessionId from tool-result:', trsid); }
+      }
+      return;
+    }
     var ndata = (message.params && message.params.structuredContent) ? message.params.structuredContent : message.params;
     var renderData = extractRenderData(ndata) || ndata;
     if (renderData) {

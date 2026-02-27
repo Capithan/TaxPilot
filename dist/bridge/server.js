@@ -421,10 +421,15 @@ const WIDGET_MIME_TYPE = APP_WIDGET_MIME_TYPE;
  * Build the widget HTML for resources/read.
  * Returns a GENERIC JavaScript-powered template that receives tool data
  * via the MCP Apps bridge (window.openai.toolOutput + postMessage).
- * Per https://developers.openai.com/apps-sdk/build/chatgpt-ui/
+ * Injects the server URL so the widget can call the REST API as fallback.
  */
-function readWidgetHtml() {
-    return getAppWidgetHtml();
+function readWidgetHtml(serverUrl) {
+    let html = getAppWidgetHtml();
+    if (serverUrl) {
+        html = html.replace('data-server-url=""', 'data-server-url="' + serverUrl + '"');
+        html = html.replace('var __TP_SERVER_URL__ = "";', 'var __TP_SERVER_URL__ = "' + serverUrl + '";');
+    }
+    return html;
 }
 // ── Tool descriptor meta — matches OpenAI kitchen-sink-lite reference ────────
 // Per github.com/openai/openai-apps-sdk-examples/kitchen_sink_server_node:
@@ -432,12 +437,23 @@ function readWidgetHtml() {
 //   'openai/toolInvocation/invoking' → loading message shown while tool runs
 //   'openai/toolInvocation/invoked'  → completion message shown when done
 //   'openai/widgetAccessible'        → true = widget can call this tool back
+/** Tool DESCRIPTOR meta — used in tools/list so ChatGPT knows which widget to mount.
+ *  Includes openai/outputTemplate which binds the tool to the widget resource. */
 function toolMeta(invoking, invoked) {
     return {
         'openai/outputTemplate': WIDGET_RESOURCE_URI,
         'openai/toolInvocation/invoking': invoking,
         'openai/toolInvocation/invoked': invoked,
         'openai/widgetAccessible': true,
+    };
+}
+/** Tool INVOCATION meta — used in tools/call RESPONSES.
+ *  Per kitchen-sink-lite reference: tool call responses MUST include openai/outputTemplate
+ *  so ChatGPT knows which widget to update with the new structuredContent. */
+function toolInvocationMeta(toolName) {
+    return {
+        ...toolMeta(`Processing ${toolName}…`, `${toolName} complete`),
+        invocation: toolName,
     };
 }
 const mcpTools = [
@@ -747,15 +763,11 @@ function handleMcpPost(req, res) {
             latestToolResult = toolResult.structuredContent;
             toolResultVersion++;
         }
-        // Use the tool's own _meta (static outputTemplate URI) so ChatGPT
-        // updates toolOutput on the existing widget instead of creating a new one.
-        const calledTool = mcpTools.find(t => t.name === toolName);
-        const invocationMeta = calledTool
-            ? { ...calledTool._meta, invocation: toolName }
-            : { 'openai/outputTemplate': WIDGET_RESOURCE_URI, 'openai/widgetAccessible': true, invocation: toolName };
+        // Per kitchen-sink-lite reference: tool call responses MUST include
+        // openai/outputTemplate so ChatGPT delivers structuredContent to the widget.
         const response = {
             ...toolResult,
-            _meta: invocationMeta,
+            _meta: toolInvocationMeta(toolName),
         };
         res.setHeader('Content-Type', 'application/json');
         res.json({
@@ -809,7 +821,10 @@ function handleMcpPost(req, res) {
         // Accept base URI or any versioned variant (ui://taxpilot/widget.html?v=N)
         if (uri.startsWith(WIDGET_RESOURCE_URI)) {
             try {
-                const html = readWidgetHtml();
+                const proto = req.get('x-forwarded-proto') || req.protocol || 'https';
+                const host = req.get('host') || 'localhost:8000';
+                const serverUrl = proto + '://' + host;
+                const html = readWidgetHtml(serverUrl);
                 res.setHeader('Content-Type', 'application/json');
                 res.json({
                     jsonrpc: '2.0',
@@ -989,16 +1004,12 @@ app.post('/messages', (req, res) => {
                 latestToolResult = toolResult.structuredContent;
                 toolResultVersion++;
             }
-            // Use the tool's own _meta (static outputTemplate URI), matching
-            // the kitchen-sink-lite reference implementation exactly.
-            const toolDef = mcpTools.find(t => t.name === params.name);
-            const responseMeta = toolDef
-                ? { ...toolDef._meta, invocation: params.name }
-                : { 'openai/outputTemplate': WIDGET_RESOURCE_URI, 'openai/widgetAccessible': true, invocation: params.name };
+            // Per kitchen-sink-lite reference: include outputTemplate so ChatGPT delivers
+            // structuredContent to the widget.
             response = {
                 jsonrpc: '2.0',
                 id,
-                result: { ...toolResult, _meta: responseMeta }
+                result: { ...toolResult, _meta: toolInvocationMeta(params.name) }
             };
             break;
         }
@@ -1040,7 +1051,10 @@ app.post('/messages', (req, res) => {
             // Accept base URI or any versioned variant (ui://taxpilot/widget.html?v=N)
             if (readUri.startsWith(WIDGET_RESOURCE_URI)) {
                 try {
-                    const html = readWidgetHtml();
+                    const proto = req.get('x-forwarded-proto') || req.protocol || 'https';
+                    const host = req.get('host') || 'localhost:8000';
+                    const sseServerUrl = proto + '://' + host;
+                    const html = readWidgetHtml(sseServerUrl);
                     response = {
                         jsonrpc: '2.0',
                         id,
