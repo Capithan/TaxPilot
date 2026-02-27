@@ -12,7 +12,7 @@
  *   4. Widget JS reads data and renders HRB-branded components
  */
 
-export const APP_WIDGET_MIME_TYPE = 'text/html;profile=mcp-app';
+export const APP_WIDGET_MIME_TYPE = 'text/html+skybridge';
 
 export function getAppWidgetHtml(): string {
   return `<!DOCTYPE html>

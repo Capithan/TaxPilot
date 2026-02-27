@@ -522,12 +522,11 @@ function toolMeta(invoking: string, invoked: string) {
 }
 
 /** Tool INVOCATION meta — used in tools/call RESPONSES.
- *  Per kitchen-sink-lite reference: responses must NOT include openai/outputTemplate
- *  so ChatGPT updates toolOutput in-place instead of re-mounting the widget iframe. */
+ *  Per kitchen-sink-lite reference: tool call responses MUST include openai/outputTemplate
+ *  so ChatGPT knows which widget to update with the new structuredContent. */
 function toolInvocationMeta(toolName: string) {
   return {
-    'openai/toolInvocation/invoking': `Processing ${toolName}…`,
-    'openai/toolInvocation/invoked': `${toolName} complete`,
+    ...toolMeta(`Processing ${toolName}…`, `${toolName} complete`),
     invocation: toolName,
   };
 }
@@ -877,9 +876,8 @@ function handleMcpPost(req: Request, res: Response) {
       latestToolResult = toolResult.structuredContent;
       toolResultVersion++;
     }
-    // Per kitchen-sink-lite: tool call responses must NOT include openai/outputTemplate.
-    // Including it causes ChatGPT to re-mount the widget iframe, destroying the
-    // callTool promise chain and preventing the UI from advancing.
+    // Per kitchen-sink-lite reference: tool call responses MUST include
+    // openai/outputTemplate so ChatGPT delivers structuredContent to the widget.
     const response = {
       ...toolResult,
       _meta: toolInvocationMeta(toolName),
@@ -1141,7 +1139,8 @@ app.post('/messages', (req: Request, res: Response) => {
         latestToolResult = toolResult.structuredContent;
         toolResultVersion++;
       }
-      // Per kitchen-sink-lite: tool call responses must NOT include openai/outputTemplate.
+      // Per kitchen-sink-lite reference: include outputTemplate so ChatGPT delivers
+      // structuredContent to the widget.
       response = {
         jsonrpc: '2.0',
         id,
