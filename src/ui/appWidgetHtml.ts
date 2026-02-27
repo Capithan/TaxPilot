@@ -46,7 +46,7 @@ body {
 .tp-loading-text { font-size: 14px; }
 
 /* Buttons */
-.tp-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 10px 20px; border: none; border-radius: var(--hrb-radius-sm); font-size: 14px; font-weight: 600; line-height: 1.4; }
+.tp-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 10px 20px; border: none; border-radius: var(--hrb-radius-sm); font-size: 14px; font-weight: 600; line-height: 1.4; cursor: pointer; -webkit-tap-highlight-color: rgba(0,163,58,0.15); touch-action: manipulation; }
 .tp-btn--primary { background: var(--hrb-green); color: #fff; }
 .tp-btn--secondary { background: var(--hrb-beige); color: var(--hrb-text); border: 1px solid var(--hrb-border); }
 .tp-btn--danger { background: var(--hrb-danger); color: #fff; }
@@ -59,7 +59,7 @@ body {
 .tp-field { display: flex; flex-direction: column; gap: 4px; }
 .tp-field-label { font-size: 13px; font-weight: 600; color: var(--hrb-text); }
 .tp-required { color: var(--hrb-danger); margin-left: 2px; }
-.tp-input { padding: 10px 12px; border: 1.5px solid var(--hrb-border); border-radius: var(--hrb-radius-sm); font-size: 14px; background: var(--hrb-white); color: var(--hrb-text); }
+.tp-input { padding: 10px 12px; border: 1.5px solid var(--hrb-border); border-radius: var(--hrb-radius-sm); font-size: 16px; background: var(--hrb-white); color: var(--hrb-text); -webkit-appearance: none; appearance: none; }
 .tp-field-help { font-size: 12px; color: var(--hrb-text-muted); }
 
 /* Form Group */
@@ -203,17 +203,17 @@ body {
 .tp-btn-submit:active { transform:scale(0.98); }
 .tp-btn-submit:disabled { opacity:0.5; cursor:wait; }
 /* Interactive: Clickable selection options */
-.tp-sopt[data-select-option] { cursor:pointer; transition:border-color 0.15s,background 0.15s; }
+.tp-sopt[data-select-option] { cursor:pointer; transition:border-color 0.15s,background 0.15s; -webkit-tap-highlight-color:rgba(0,163,58,0.15); touch-action:manipulation; }
 .tp-sopt[data-select-option]:hover { border-color:var(--hrb-green); background:var(--hrb-green-light); }
 /* Interactive: Toggleable multi-select */
-.tp-mopt[data-multi-option] { cursor:pointer; transition:border-color 0.15s,background 0.15s; }
+.tp-mopt[data-multi-option] { cursor:pointer; transition:border-color 0.15s,background 0.15s; -webkit-tap-highlight-color:rgba(0,163,58,0.15); touch-action:manipulation; }
 .tp-mopt[data-multi-option]:hover { border-color:var(--hrb-green); }
 .tp-mopt--selected { border-color:var(--hrb-green)!important; background:var(--hrb-green-light); }
 .tp-mopt--selected .tp-mopt-check { border-color:var(--hrb-green); background:var(--hrb-green); color:#fff; }
-/* Interactive: Clickable buttons */
-.tp-btn[data-btn-msg] { cursor:pointer; opacity:1!important; pointer-events:auto!important; transition:filter 0.15s; }
-.tp-btn[data-btn-msg]:hover { filter:brightness(1.1); }
-.tp-btn[data-btn-msg]:active { transform:scale(0.98); }
+/* Interactive: Clickable buttons (both tool-call and message buttons) */
+.tp-btn[data-btn-tool], .tp-btn[data-btn-msg] { cursor:pointer; opacity:1!important; pointer-events:auto!important; transition:filter 0.15s; -webkit-tap-highlight-color:rgba(0,163,58,0.15); touch-action:manipulation; }
+.tp-btn[data-btn-tool]:hover, .tp-btn[data-btn-msg]:hover { filter:brightness(1.1); }
+.tp-btn[data-btn-tool]:active, .tp-btn[data-btn-msg]:active { transform:scale(0.98); }
 
 @keyframes confetti-pop { 0% { transform: scale(0.95); opacity: 0; } 50% { transform: scale(1.02); } 100% { transform: scale(1); opacity: 1; } }
 .tp-banner[data-confetti="true"] { animation: confetti-pop 0.5s ease-out; }
@@ -229,7 +229,7 @@ body {
   </div>
 </div>
 
-<script type="module">
+<script>
 // ─── Globals ─────────────────────────────────────────────────────────────────
 var _formId = 0;
 var _multiId = 0;
@@ -295,7 +295,8 @@ function normalizeAction(act) {
 function renderFormGroup(c) {
   var fid = 'form-' + (++_formId);
   const title = c.title ? '<div class="tp-form-title">' + esc(c.title) + '</div>' : '';
-  const subtitle = c.subtitle ? '<div class="tp-form-desc">' + esc(c.subtitle) + '</div>' : '';
+  const desc = c.subtitle || c.description;
+  const subtitle = desc ? '<div class="tp-form-desc">' + esc(desc) + '</div>' : '';
   // Allow both submitAction (builder schema) and action (legacy schema)
   const submitAction = c.submitAction || c.action;
   const fields = (c.fields || []).map(function(f) {
@@ -307,6 +308,11 @@ function renderFormGroup(c) {
       input = '<select class="tp-input tp-select" data-field-id="' + esc(f.id || f.label) + '"><option value="" disabled selected>' + esc(f.placeholder || 'Select...') + '</option>' + opts + '</select>';
     } else if (fType === 'textarea') {
       input = '<textarea class="tp-input tp-textarea" data-field-id="' + esc(f.id || f.label) + '" placeholder="' + esc(f.placeholder || '') + '" rows="3"></textarea>';
+    } else if (fType === 'date') {
+      // Use text input with pattern for date fields — type="date" is unreliable in Android WebViews
+      input = '<input type="text" inputmode="numeric" class="tp-input" data-field-id="' + esc(f.id || f.label) + '" placeholder="' + esc(f.placeholder || 'MM/DD/YYYY') + '" pattern="[0-9]{2}/[0-9]{2}/[0-9]{4}" maxlength="10">';
+    } else if (fType === 'phone') {
+      input = '<input type="tel" class="tp-input" data-field-id="' + esc(f.id || f.label) + '" placeholder="' + esc(f.placeholder || '') + '">';
     } else {
       input = '<input type="' + esc(fType) + '" class="tp-input" data-field-id="' + esc(f.id || f.label) + '" placeholder="' + esc(f.placeholder || '') + '">';
     }
@@ -600,26 +606,19 @@ function sendMessage(text) {
 
 /** Call an MCP tool from the widget via the bridge */
 function callTool(toolName, args) {
-  // Prefer Apps SDK bridge when available.
-  // Current signature: callTool(name, args)
-  // Legacy compatibility: callTool({ name, arguments })
+  // Prefer Apps SDK bridge when available (per OpenAI docs)
   if (window.openai && typeof window.openai.callTool === 'function') {
-    return Promise.resolve()
-      .then(function() {
-        return window.openai.callTool(toolName, args || {});
-      })
-      .catch(function(primaryErr) {
-        return Promise.resolve()
-          .then(function() {
-            return window.openai.callTool({ name: toolName, arguments: args || {} });
-          })
-          .catch(function(legacyErr) {
-            console.warn('[TaxPilot] window.openai.callTool failed in both signatures; falling back to MCP JSON-RPC.', primaryErr, legacyErr);
-            return rpcRequest('tools/call', { name: toolName, arguments: args || {} });
-          });
-      });
+    try {
+      var p = window.openai.callTool(toolName, args || {});
+      // Ensure we always return a promise
+      if (p && typeof p.then === 'function') return p;
+      return Promise.resolve(p);
+    } catch (e) {
+      console.warn('[TaxPilot] window.openai.callTool threw synchronously:', e);
+      // Fall through to RPC bridge
+    }
   }
-  // Fallback to MCP Apps JSON-RPC bridge
+  // Fallback to MCP Apps JSON-RPC bridge (postMessage to parent)
   return rpcRequest('tools/call', { name: toolName, arguments: args || {} });
 }
 
@@ -645,45 +644,123 @@ function openExternal(href) {
 }
 
 // ─── Generic tool call + re-render helper ──────────────────────────────────
+var _pendingRender = false; // Flag: are we waiting for a tool result to render?
+
 function callToolAndRender(toolName, params, btn, origLabel) {
   if (btn) { btn.disabled = true; btn.textContent = 'Working\u2026'; }
-  var isOpenAiHost = !!(window.openai && typeof window.openai.callTool === 'function');
-  callTool(toolName, params).then(function(result) {
-    // Per OpenAI dice example: window.openai.callTool returns { structuredContent: … }.
-    // Also handle MCP bridge (structuredContent at top level) and legacy (result.result…).
-    var data = null;
-    if (result && result.structuredContent) {
-      // Standard: callTool returns { structuredContent: { components, screen, … } }
-      data = result.structuredContent;
-    } else if (result && result.result && result.result.structuredContent) {
-      // Nested: some bridge versions wrap an extra result layer
-      data = result.result.structuredContent;
-    } else if (isOpenAiHost) {
-      // Fallback: openai:set_globals may have already updated toolOutput
-      data = window.openai && window.openai.toolOutput;
-    } else if (result && typeof result === 'object') {
-      // Raw structuredContent returned directly (standalone MCP bridge)
-      data = result;
-    }
-    if (data) {
-      console.log('[TaxPilot] callToolAndRender: rendering result for', toolName);
+  _pendingRender = true;
+
+  // Show a loading indicator in the content area so the user sees feedback
+  var contentEl = document.getElementById('content');
+  var prevHtml = contentEl ? contentEl.innerHTML : '';
+  if (contentEl) {
+    contentEl.insertAdjacentHTML('beforeend',
+      '<div id="tp-loading-overlay" style="text-align:center;padding:24px;color:var(--hrb-text-muted)">'
+      + '<div style="font-size:24px;margin-bottom:8px">\u23F3</div>'
+      + '<div style="font-size:14px">Processing ' + esc(toolName.replace(/_/g, ' ')) + '\u2026</div>'
+      + '</div>');
+  }
+
+  function cleanupLoading() {
+    var overlay = document.getElementById('tp-loading-overlay');
+    if (overlay) overlay.remove();
+  }
+
+  function restoreBtn() {
+    if (btn && btn.parentNode) { btn.disabled = false; btn.textContent = origLabel; }
+  }
+
+  function tryRender(data) {
+    if (data && (data.components || data.screen || data.type || data.title)) {
+      _pendingRender = false;
+      cleanupLoading();
       render(data);
-    } else {
-      console.warn('[TaxPilot] callToolAndRender: no renderable data from', toolName, result);
+      // Scroll to top of widget so user sees the new content
+      var root = document.getElementById('widget-root');
+      if (root) root.scrollTop = 0;
+      return true;
     }
-    updateModelContext('User progressed via ' + toolName);
-    if (btn) { btn.disabled = false; btn.textContent = origLabel; }
+    return false;
+  }
+
+  callTool(toolName, params).then(function(result) {
+    console.log('[TaxPilot] callTool resolved for', toolName, typeof result);
+
+    // 1. Standard: { structuredContent: { components, screen, … } }
+    if (result && result.structuredContent && tryRender(result.structuredContent)) {
+      restoreBtn();
+      updateModelContext('User progressed via ' + toolName);
+      return;
+    }
+    // 2. Nested result wrapper
+    if (result && result.result && result.result.structuredContent && tryRender(result.result.structuredContent)) {
+      restoreBtn();
+      updateModelContext('User progressed via ' + toolName);
+      return;
+    }
+    // 3. Raw structured content at top level
+    if (result && typeof result === 'object' && tryRender(result)) {
+      restoreBtn();
+      updateModelContext('User progressed via ' + toolName);
+      return;
+    }
+    // 4. Check toolOutput (may have been updated by ChatGPT already)
+    if (window.openai && window.openai.toolOutput && tryRender(window.openai.toolOutput)) {
+      restoreBtn();
+      updateModelContext('User progressed via ' + toolName);
+      return;
+    }
+
+    // 5. If nothing rendered yet, wait briefly for openai:set_globals to fire
+    console.log('[TaxPilot] No immediate render data — waiting for set_globals event');
+    setTimeout(function() {
+      if (!_pendingRender) return; // Already rendered by set_globals listener
+      // Last check: maybe toolOutput was updated
+      if (window.openai && window.openai.toolOutput && tryRender(window.openai.toolOutput)) {
+        restoreBtn();
+        updateModelContext('User progressed via ' + toolName);
+        return;
+      }
+      // Still nothing — send as chat message so the model can handle it
+      console.warn('[TaxPilot] No render data after timeout — sending follow-up message');
+      cleanupLoading();
+      _pendingRender = false;
+      restoreBtn();
+      if (window.openai && typeof window.openai.sendFollowUpMessage === 'function') {
+        window.openai.sendFollowUpMessage({ prompt: 'Run ' + toolName + ' with parameters: ' + JSON.stringify(params) });
+      } else {
+        sendMessage('Please run ' + toolName + ' with ' + JSON.stringify(params));
+      }
+    }, 3000);
+
   }).catch(function(err) {
     console.error('[TaxPilot] Tool call failed:', toolName, err);
-    if (btn) { btn.disabled = false; btn.textContent = origLabel; }
-    // Fallback: send as chat message so the LLM can still handle it
-    if (isOpenAiHost && window.openai && window.openai.sendFollowUpMessage) {
-      window.openai.sendFollowUpMessage({ prompt: 'Please run ' + toolName + ' with ' + JSON.stringify(params) });
+    cleanupLoading();
+    _pendingRender = false;
+    restoreBtn();
+    // Fallback: ask the model to run the tool via chat
+    if (window.openai && typeof window.openai.sendFollowUpMessage === 'function') {
+      window.openai.sendFollowUpMessage({ prompt: 'Run ' + toolName + ' with parameters: ' + JSON.stringify(params) });
     } else {
       sendMessage('Please run ' + toolName + ' with ' + JSON.stringify(params));
     }
   });
 }
+
+// ─── Date field auto-format helper (MM/DD/YYYY) ─────────────────────────────
+document.getElementById('content').addEventListener('input', function(e) {
+  var inp = e.target;
+  if (!inp || !inp.dataset || !inp.dataset.fieldId) return;
+  // Only auto-format inputs with maxlength=10 (our date fields)
+  if (inp.getAttribute('maxlength') !== '10') return;
+  var raw = inp.value.replace(/[^0-9]/g, '');
+  if (raw.length > 8) raw = raw.substr(0, 8);
+  var formatted = '';
+  if (raw.length > 4) { formatted = raw.substr(0, 2) + '/' + raw.substr(2, 2) + '/' + raw.substr(4); }
+  else if (raw.length > 2) { formatted = raw.substr(0, 2) + '/' + raw.substr(2); }
+  else { formatted = raw; }
+  if (inp.value !== formatted) inp.value = formatted;
+});
 
 // ─── Event Delegation (interactive forms, selections, buttons) ──────────────
 document.getElementById('content').addEventListener('click', function(e) {
@@ -693,31 +770,47 @@ document.getElementById('content').addEventListener('click', function(e) {
     if (t.dataset && t.dataset.formSubmit) {
       var formEl = document.querySelector('[data-form-id="' + t.dataset.formSubmit + '"]');
       if (formEl) {
+        var origLabel = t.textContent || 'Continue \u2192';
         var inputs = formEl.querySelectorAll('.tp-input');
         var formData = {};
+        var emptyRequired = false;
         inputs.forEach(function(inp) {
           var fieldId = inp.dataset.fieldId || '';
-          var val = inp.value?.trim();
+          var val = (inp.value || '').trim();
           if (fieldId && val) formData[fieldId] = val;
+          // Check if required field is empty
+          var fieldDiv = inp.closest('.tp-field');
+          if (fieldDiv && fieldDiv.querySelector('.tp-required') && !val) {
+            inp.style.borderColor = 'var(--hrb-danger)';
+            emptyRequired = true;
+          } else {
+            inp.style.borderColor = '';
+          }
         });
-        if (Object.keys(formData).length === 0) return;
+        if (Object.keys(formData).length === 0 || emptyRequired) {
+          // Show validation message briefly
+          t.textContent = 'Please fill required fields';
+          setTimeout(function() { t.textContent = origLabel; }, 2000);
+          return;
+        }
         var actionStr = formEl.dataset.formAction;
         if (actionStr) {
           try {
             var action = JSON.parse(actionStr);
             if (action.tool) {
               var params = Object.assign({}, action.parameters || {}, { formData: formData });
-              callToolAndRender(action.tool, params, t, t.textContent);
+              callToolAndRender(action.tool, params, t, origLabel);
               return;
             }
-          } catch(ex) {}
+          } catch(ex) { console.error('[TaxPilot] Failed to parse form action:', ex); }
         }
         // Fallback: send as chat message
         var parts = [];
         inputs.forEach(function(inp) {
           var lbl = inp.closest('.tp-field');
-          var labelText = lbl ? lbl.querySelector('.tp-field-label')?.textContent?.replace('*','').trim() : '';
-          var val = inp.value?.trim();
+          var labelText = lbl ? (lbl.querySelector('.tp-field-label') || {}).textContent : '';
+          labelText = (labelText || '').replace('*','').trim();
+          var val = (inp.value || '').trim();
           if (labelText && val) parts.push(labelText + ': ' + val);
         });
         if (parts.length > 0) {
@@ -771,7 +864,7 @@ document.getElementById('content').addEventListener('click', function(e) {
       if (container) {
         var selected = container.querySelectorAll('.tp-mopt--selected');
         var values = [];
-        selected.forEach(function(el) { values.push(el.dataset.multiValue || el.dataset.multiOption || el.querySelector('.tp-mopt-label')?.textContent?.trim()); });
+        selected.forEach(function(el) { var lbl = el.querySelector('.tp-mopt-label'); values.push(el.dataset.multiValue || el.dataset.multiOption || (lbl && lbl.textContent ? lbl.textContent.trim() : '')); });
         if (values.length === 0) return;
         var multiActionStr = container.dataset.multiAction;
         if (multiActionStr) {
@@ -842,6 +935,9 @@ window.addEventListener('openai:set_globals', function() {
   var data = window.openai && window.openai.toolOutput;
   if (data) {
     console.log('[TaxPilot] openai:set_globals fired — re-rendering with new toolOutput.');
+    _pendingRender = false; // Cancel any pending timeout fallback
+    var overlay = document.getElementById('tp-loading-overlay');
+    if (overlay) overlay.remove();
     render(data);
   }
 }, { passive: true });
@@ -863,7 +959,7 @@ window.addEventListener('message', function(event) {
 
   // MCP Apps bridge notifications
   if (message.method === 'ui/notifications/tool-result') {
-    const data = message.params?.structuredContent ?? message.params;
+    const data = (message.params && message.params.structuredContent) ? message.params.structuredContent : message.params;
     if (data) render(data);
   }
   if (message.method === 'ui/notifications/tool-input') {
