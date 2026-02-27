@@ -510,12 +510,25 @@ function readWidgetHtml(): string {
 //   'openai/toolInvocation/invoking' → loading message shown while tool runs
 //   'openai/toolInvocation/invoked'  → completion message shown when done
 //   'openai/widgetAccessible'        → true = widget can call this tool back
+/** Tool DESCRIPTOR meta — used in tools/list so ChatGPT knows which widget to mount.
+ *  Includes openai/outputTemplate which binds the tool to the widget resource. */
 function toolMeta(invoking: string, invoked: string) {
   return {
     'openai/outputTemplate': WIDGET_RESOURCE_URI,
     'openai/toolInvocation/invoking': invoking,
     'openai/toolInvocation/invoked': invoked,
     'openai/widgetAccessible': true,
+  };
+}
+
+/** Tool INVOCATION meta — used in tools/call RESPONSES.
+ *  Per kitchen-sink-lite reference: responses must NOT include openai/outputTemplate
+ *  so ChatGPT updates toolOutput in-place instead of re-mounting the widget iframe. */
+function toolInvocationMeta(toolName: string) {
+  return {
+    'openai/toolInvocation/invoking': `Processing ${toolName}…`,
+    'openai/toolInvocation/invoked': `${toolName} complete`,
+    invocation: toolName,
   };
 }
 
@@ -864,15 +877,12 @@ function handleMcpPost(req: Request, res: Response) {
       latestToolResult = toolResult.structuredContent;
       toolResultVersion++;
     }
-    // Use the tool's own _meta (static outputTemplate URI) so ChatGPT
-    // updates toolOutput on the existing widget instead of creating a new one.
-    const calledTool = mcpTools.find(t => t.name === toolName);
-    const invocationMeta = calledTool
-      ? { ...(calledTool._meta as Record<string, unknown>), invocation: toolName }
-      : { 'openai/outputTemplate': WIDGET_RESOURCE_URI, 'openai/widgetAccessible': true, invocation: toolName };
+    // Per kitchen-sink-lite: tool call responses must NOT include openai/outputTemplate.
+    // Including it causes ChatGPT to re-mount the widget iframe, destroying the
+    // callTool promise chain and preventing the UI from advancing.
     const response = {
       ...toolResult,
-      _meta: invocationMeta,
+      _meta: toolInvocationMeta(toolName),
     };
     res.setHeader('Content-Type', 'application/json');
     res.json({
@@ -1131,16 +1141,11 @@ app.post('/messages', (req: Request, res: Response) => {
         latestToolResult = toolResult.structuredContent;
         toolResultVersion++;
       }
-      // Use the tool's own _meta (static outputTemplate URI), matching
-      // the kitchen-sink-lite reference implementation exactly.
-      const toolDef = mcpTools.find(t => t.name === params.name);
-      const responseMeta = toolDef
-        ? { ...(toolDef._meta as Record<string, unknown>), invocation: params.name }
-        : { 'openai/outputTemplate': WIDGET_RESOURCE_URI, 'openai/widgetAccessible': true, invocation: params.name };
+      // Per kitchen-sink-lite: tool call responses must NOT include openai/outputTemplate.
       response = {
         jsonrpc: '2.0',
         id,
-        result: { ...toolResult, _meta: responseMeta }
+        result: { ...toolResult, _meta: toolInvocationMeta(params.name) }
       };
       break;
     }

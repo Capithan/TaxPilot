@@ -649,17 +649,27 @@ function callToolAndRender(toolName, params, btn, origLabel) {
   if (btn) { btn.disabled = true; btn.textContent = 'Working\u2026'; }
   var isOpenAiHost = !!(window.openai && typeof window.openai.callTool === 'function');
   callTool(toolName, params).then(function(result) {
-    // In ChatGPT Skybridge, callTool resolves with { result: string } (text summary).
-    // The structured UI data arrives via openai:set_globals event, which our listener handles.
-    // In MCP Apps bridge mode, the result contains structuredContent directly.
-    if (isOpenAiHost) {
-      // ChatGPT: openai:set_globals listener handles the re-render.
-      // Also check if toolOutput was already updated synchronously.
-      var toolOutput = window.openai?.toolOutput;
-      if (toolOutput) render(toolOutput);
+    // Per OpenAI dice example: window.openai.callTool returns { structuredContent: … }.
+    // Also handle MCP bridge (structuredContent at top level) and legacy (result.result…).
+    var data = null;
+    if (result && result.structuredContent) {
+      // Standard: callTool returns { structuredContent: { components, screen, … } }
+      data = result.structuredContent;
+    } else if (result && result.result && result.result.structuredContent) {
+      // Nested: some bridge versions wrap an extra result layer
+      data = result.result.structuredContent;
+    } else if (isOpenAiHost) {
+      // Fallback: openai:set_globals may have already updated toolOutput
+      data = window.openai && window.openai.toolOutput;
+    } else if (result && typeof result === 'object') {
+      // Raw structuredContent returned directly (standalone MCP bridge)
+      data = result;
+    }
+    if (data) {
+      console.log('[TaxPilot] callToolAndRender: rendering result for', toolName);
+      render(data);
     } else {
-      var data = result?.structuredContent ?? result?.result?.structuredContent ?? result;
-      if (data) { render(data); }
+      console.warn('[TaxPilot] callToolAndRender: no renderable data from', toolName, result);
     }
     updateModelContext('User progressed via ' + toolName);
     if (btn) { btn.disabled = false; btn.textContent = origLabel; }
@@ -667,7 +677,7 @@ function callToolAndRender(toolName, params, btn, origLabel) {
     console.error('[TaxPilot] Tool call failed:', toolName, err);
     if (btn) { btn.disabled = false; btn.textContent = origLabel; }
     // Fallback: send as chat message so the LLM can still handle it
-    if (isOpenAiHost && window.openai?.sendFollowUpMessage) {
+    if (isOpenAiHost && window.openai && window.openai.sendFollowUpMessage) {
       window.openai.sendFollowUpMessage({ prompt: 'Please run ' + toolName + ' with ' + JSON.stringify(params) });
     } else {
       sendMessage('Please run ' + toolName + ' with ' + JSON.stringify(params));

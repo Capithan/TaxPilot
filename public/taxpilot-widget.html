@@ -1208,6 +1208,11 @@ function esc(text) {
     if (window.openai && typeof window.openai.callTool === 'function') {
       try {
         const result = await window.openai.callTool(name, args);
+        // Per OpenAI dice example: callTool returns { structuredContent: … }.
+        // Normalise: ensure the result always has structuredContent if it has components.
+        if (result && !result.structuredContent && Array.isArray(result.components)) {
+          return { structuredContent: result };
+        }
         return result;
       } catch (e) {
         console.warn('[Widget] window.openai.callTool failed, falling back:', e);
