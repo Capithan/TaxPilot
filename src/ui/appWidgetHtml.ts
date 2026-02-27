@@ -229,6 +229,7 @@ body {
   </div>
 </div>
 
+<script>var __TP_SERVER_URL__ = "";</script>
 <script>
 // ─── Globals ─────────────────────────────────────────────────────────────────
 var _formId = 0;
@@ -585,8 +586,9 @@ function render(data) {
 // ─── Bridge Helpers ──────────────────────────────────────────────────────────
 var _rpcId = 0;
 var _rpcCallbacks = {};
-var _serverUrl = document.body.getAttribute('data-server-url') || '';
+var _serverUrl = (typeof __TP_SERVER_URL__ !== 'undefined' && __TP_SERVER_URL__) || document.body.getAttribute('data-server-url') || '';
 var _pendingRender = false;
+console.log('[TP] init: serverUrl=' + _serverUrl + ', openai=' + (typeof window.openai) + ', callTool=' + (window.openai && typeof window.openai.callTool));
 
 /** Send a JSON-RPC 2.0 request to the host and return a promise for the result */
 function rpcRequest(method, params) {
@@ -625,14 +627,23 @@ function bridgeCallTool(toolName, args) {
 
 // ── Tier 2: Direct REST call to server ───────────────────────────────────────
 function restCallTool(toolName, args) {
-  if (!_serverUrl) return Promise.reject(new Error('no server URL'));
-  return fetch(_serverUrl + '/api/tools/call', {
+  if (!_serverUrl) {
+    console.warn('[TP] REST: no server URL configured');
+    return Promise.reject(new Error('no server URL'));
+  }
+  var url = _serverUrl + '/api/tools/call';
+  console.log('[TP] REST: fetching', url, 'for', toolName);
+  return fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name: toolName, args: args || {} }),
   }).then(function(resp) {
+    console.log('[TP] REST: status', resp.status, 'for', toolName);
     if (!resp.ok) throw new Error('REST ' + resp.status);
     return resp.json();
+  }).then(function(json) {
+    console.log('[TP] REST: got JSON with keys', Object.keys(json).join(','));
+    return json;
   });
 }
 
@@ -641,35 +652,20 @@ function modelCallTool(toolName, args) {
   sendFollowUp('Please call the tool ' + toolName + ' with arguments: ' + JSON.stringify(args));
 }
 
-// ── Unified callTool — tries bridge → REST → model ──────────────────────────
+// ── Unified callTool — REST first, bridge fallback ───────────────────────────
+// REST is the primary mechanism because the widget can reach the server directly.
+// The bridge (window.openai.callTool) is unreliable — it may resolve with undefined,
+// hang, or cause double-processing if also tried via REST.
 function callTool(toolName, args) {
-  // Try the Apps SDK bridge first (2.5s timeout)
-  return new Promise(function(resolve, reject) {
-    var settled = false;
-    function settle(val) { if (!settled) { settled = true; resolve(val); } }
-    function fail(err) { if (!settled) { settled = true; reject(err); } }
-
-    bridgeCallTool(toolName, args).then(function(res) {
-      console.log('[TP] bridge OK for', toolName);
-      settle(res);
-    }).catch(function(e1) {
-      console.warn('[TP] bridge failed:', e1.message || e1, '— trying REST');
-      restCallTool(toolName, args).then(function(res) {
-        console.log('[TP] REST OK for', toolName);
-        settle(res);
-      }).catch(function(e2) {
-        console.warn('[TP] REST failed:', e2.message || e2);
-        fail(e2);
-      });
+  // If we have a server URL, always prefer REST (direct, fast, reliable)
+  if (_serverUrl) {
+    return restCallTool(toolName, args).catch(function(restErr) {
+      console.warn('[TP] REST failed for', toolName, restErr.message || restErr, '— trying bridge');
+      return bridgeCallTool(toolName, args);
     });
-
-    // Hard timeout: if bridge doesn't resolve in 4s, try REST in parallel
-    setTimeout(function() {
-      if (settled) return;
-      console.warn('[TP] bridge timeout — trying REST in parallel');
-      restCallTool(toolName, args).then(settle).catch(function() {});
-    }, 4000);
-  });
+  }
+  // No server URL — try bridge, then give up
+  return bridgeCallTool(toolName, args);
 }
 
 // ── Extract renderable data from any response shape ──────────────────────────
@@ -707,41 +703,72 @@ function callToolAndRender(toolName, params, btn, origLabel) {
       render(data);
       var root = document.getElementById('widget-root');
       if (root) root.scrollTop = 0;
+    } else {
+      // Show error inline so user knows something went wrong
+      var errHtml = '<div style="text-align:center;padding:24px;color:var(--hrb-danger)">'
+        + '<div style="font-size:20px;margin-bottom:8px">\u26A0\uFE0F</div>'
+        + '<div style="font-size:14px">Could not load the next step.</div>'
+        + '<div style="font-size:12px;margin-top:8px;color:var(--hrb-text-muted)">Server: ' + esc(_serverUrl || 'not set') + '</div>'
+        + '</div>';
+      var c = document.getElementById('content');
+      if (c) c.insertAdjacentHTML('beforeend', errHtml);
     }
     if (btn && btn.parentNode) { btn.disabled = false; btn.textContent = origLabel; }
   }
 
+  console.log('[TP] callToolAndRender:', toolName, JSON.stringify(params).substring(0, 200), 'serverUrl=' + _serverUrl);
+
+  // Debug log helper — appends to a visible debug panel (remove in production)
+  var _dbg = document.getElementById('tp-debug');
+  if (!_dbg) {
+    var wr = document.getElementById('widget-root');
+    if (wr) {
+      wr.insertAdjacentHTML('beforeend', '<div id="tp-debug" style="position:fixed;bottom:0;left:0;right:0;max-height:150px;overflow:auto;background:#1a1a2e;color:#0f0;font:11px monospace;padding:8px;z-index:9999;border-top:2px solid #e63946;display:none"></div>');
+      _dbg = document.getElementById('tp-debug');
+    }
+  }
+  function dbg(msg) {
+    console.log('[TP]', msg);
+    if (_dbg) { _dbg.style.display = 'block'; _dbg.innerHTML += esc(msg) + '<br>'; _dbg.scrollTop = _dbg.scrollHeight; }
+  }
+  dbg('callToolAndRender: ' + toolName + ' | serverUrl=' + (_serverUrl || 'EMPTY') + ' | bridge=' + (window.openai && typeof window.openai.callTool));
+
   callTool(toolName, params).then(function(result) {
-    console.log('[TP] callTool resolved for', toolName, typeof result);
+    var rtype = typeof result;
+    var rkeys = result && typeof result === 'object' ? Object.keys(result).join(',') : 'N/A';
+    dbg('callTool resolved: type=' + rtype + ' keys=' + rkeys);
     var data = extractRenderData(result);
-    if (data) { done(data); return; }
-    // Check toolOutput (ChatGPT may have updated it via set_globals)
+    if (data) { dbg('Render data found! Rendering...'); done(data); return; }
+
+    // Tool resolved but no renderable data — check toolOutput then wait for set_globals
+    dbg('No renderable data in response — checking toolOutput');
     var to = window.openai && window.openai.toolOutput;
-    if (to && extractRenderData(to)) { done(extractRenderData(to)); return; }
-    // Wait briefly for set_globals
-    console.log('[TP] No render data yet — waiting for set_globals');
-    setTimeout(function() {
-      if (!_pendingRender) return;
-      var to2 = window.openai && window.openai.toolOutput;
-      if (to2 && extractRenderData(to2)) { done(extractRenderData(to2)); return; }
-      // Last resort: ask model
-      console.warn('[TP] Timeout — falling back to sendFollowUp');
-      done(null);
-      modelCallTool(toolName, params);
-    }, 3000);
+    if (to) { var d = extractRenderData(to); if (d) { dbg('toolOutput had data!'); done(d); return; } }
+
+    // Wait briefly for set_globals (ChatGPT may push updated data)
+    dbg('Waiting for set_globals...');
+    waitForSetGlobals(toolName, params, done);
   }).catch(function(err) {
-    console.error('[TP] callTool error:', toolName, err);
-    // Try REST one more time as last resort
-    restCallTool(toolName, params).then(function(result) {
-      var data = extractRenderData(result);
-      if (data) { done(data); return; }
-      done(null);
-      modelCallTool(toolName, params);
-    }).catch(function() {
-      done(null);
-      modelCallTool(toolName, params);
-    });
+    dbg('callTool FAILED: ' + (err.message || err));
+    console.error('[TP] callTool failed:', toolName, err);
+    // All tiers failed — show error and ask model as last resort
+    done(null);
+    modelCallTool(toolName, params);
   });
+}
+
+/** Wait briefly for set_globals, then fall back to model prompt */
+function waitForSetGlobals(toolName, params, done) {
+  console.log('[TP] Waiting 3s for set_globals\u2026');
+  setTimeout(function() {
+    if (!_pendingRender) return; // already rendered by set_globals listener
+    var to = window.openai && window.openai.toolOutput;
+    var data = to ? extractRenderData(to) : null;
+    if (data) { done(data); return; }
+    console.warn('[TP] No data after all tiers \u2014 falling back to model');
+    done(null);
+    modelCallTool(toolName, params);
+  }, 3000);
 }
 
 // ─── Date field auto-format helper (MM/DD/YYYY) ─────────────────────────────
@@ -930,9 +957,10 @@ if (window.openai && window.openai.toolOutput) {
 // always read the current value from window.openai directly.
 window.addEventListener('openai:set_globals', function() {
   var raw = window.openai && window.openai.toolOutput;
+  console.log('[TP] set_globals fired, toolOutput type=' + typeof raw + ', keys=' + (raw ? Object.keys(raw).join(',') : 'null') + ', pendingRender=' + _pendingRender);
   var data = raw ? (extractRenderData(raw) || raw) : null;
   if (data) {
-    console.log('[TP] set_globals fired — re-rendering');
+    console.log('[TP] set_globals: rendering data with keys=' + Object.keys(data).join(','));
     _pendingRender = false;
     var overlay = document.getElementById('tp-loading-overlay');
     if (overlay) overlay.remove();

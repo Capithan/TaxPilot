@@ -504,6 +504,7 @@ function readWidgetHtml(serverUrl?: string): string {
   let html = getAppWidgetHtml();
   if (serverUrl) {
     html = html.replace('data-server-url=""', 'data-server-url="' + serverUrl + '"');
+    html = html.replace('var __TP_SERVER_URL__ = "";', 'var __TP_SERVER_URL__ = "' + serverUrl + '";');
   }
   return html;
 }
