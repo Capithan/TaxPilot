@@ -481,7 +481,8 @@ const mcpTools = [
 function handleToolCall(name, args) {
     try {
         switch (name) {
-            case 'render_taxpilot_ui': {
+            case 'render_taxpilot_ui':
+            case 'render_welcome_ui': {
                 return toMcpContent(formatWelcomeScreen());
             }
             case 'start_intake': {

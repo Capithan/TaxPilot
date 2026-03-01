@@ -562,7 +562,8 @@ const mcpTools = [
 function handleToolCall(name: string, args: Record<string, unknown>): { content: Array<{ type: string; text: string }>; structuredContent?: Record<string, unknown> } {
   try {
     switch (name) {
-      case 'render_taxpilot_ui': {
+      case 'render_taxpilot_ui':
+      case 'render_welcome_ui': {
         return toMcpContent(formatWelcomeScreen() as unknown as Record<string, unknown>);
       }
 

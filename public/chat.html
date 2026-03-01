@@ -1646,34 +1646,11 @@
 <div class="chat-container" id="chatContainer">
   <div class="chat-messages" id="chatMessages">
 
-    <!-- Welcome screen -->
+    <!-- Welcome screen — loaded dynamically from server -->
     <div class="welcome" id="welcome">
-      <div class="welcome-logo">
-        <img src="hrb-logo.png" alt="H&R Block">
-      </div>
-      <h2>Welcome to TaxPilot</h2>
-      <p>Your AI-powered tax intake assistant by H&amp;R Block. I'll guide you through collecting your information, generating a document checklist, and matching you with the right tax professional.</p>
-      <div class="starters">
-        <button class="starter-btn" onclick="sendDirectToolCall('start_intake', {})">
-          <div class="starter-icon">&#x1F4DD;</div>
-          <div class="starter-title">Prepare for appointment</div>
-          <div class="starter-desc">Start the full intake process</div>
-        </button>
-        <button class="starter-btn" onclick="sendStarter('Help me get my tax documents together')">
-          <div class="starter-icon">&#x1F4CB;</div>
-          <div class="starter-title">Document checklist</div>
-          <div class="starter-desc">Figure out what documents you need</div>
-        </button>
-        <button class="starter-btn" onclick="sendStarter('Find the right tax professional for me')">
-          <div class="starter-icon">&#x1F468;&#x200D;&#x1F4BC;</div>
-          <div class="starter-title">Find a tax pro</div>
-          <div class="starter-desc">Get matched based on your needs</div>
-        </button>
-        <button class="starter-btn" onclick="sendStarter('What can TaxPilot help me with?')">
-          <div class="starter-icon">&#x1F4A1;</div>
-          <div class="starter-title">Learn more</div>
-          <div class="starter-desc">See everything I can do</div>
-        </button>
+      <div style="text-align:center;padding:40px 20px;color:#888">
+        <div style="font-size:32px;margin-bottom:8px">&#x1F7E2;</div>
+        <div style="font-size:14px">Loading TaxPilot&hellip;</div>
       </div>
     </div>
 
@@ -2309,6 +2286,39 @@
 
   // Init flow stage
   updateFlowStage('welcome');
+
+  // ── Auto-load structured welcome screen from server ───
+  ;(async function loadWelcomeUI() {
+    try {
+      var resp = await fetch('/api/tools/call', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'render_welcome_ui', args: {} }),
+      });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      var data = await resp.json();
+      var structUi = data.structuredContent || null;
+      if (!structUi && data.screen && Array.isArray(data.components)) structUi = data;
+      if (structUi && Array.isArray(structUi.components)) {
+        var welcomeEl = document.getElementById('welcome');
+        if (welcomeEl) {
+          welcomeEl.innerHTML = uiRenderer.render(structUi);
+          uiRenderer.bind(welcomeEl);
+          console.log('[TaxPilot] Welcome screen loaded and rendered.');
+          // Trigger confetti if welcome banner has it
+          var hasConfetti = structUi.components.some(function(c) {
+            return c.type === 'banner' && c.confetti;
+          });
+          if (hasConfetti) triggerConfetti(welcomeEl);
+        }
+      } else {
+        console.warn('[TaxPilot] Welcome response had no structured UI:', Object.keys(data));
+      }
+    } catch (err) {
+      console.error('[TaxPilot] Failed to load welcome screen:', err);
+      // Leave loading placeholder; user can still type in the input
+    }
+  })();
 </script>
 
 </body>
