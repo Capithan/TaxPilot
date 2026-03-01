@@ -1033,8 +1033,8 @@ server.setRequestHandler(GetPromptRequestSchema, async (request) => {
 TaxPilot uses a defined conversation flow that MUST be followed in order. After EVERY action, use the 'get_conversation_flow' tool to see what stage you're at and what to do next.
 
 ### THE FLOW (in order):
-1. **WELCOME** → Start intake session, greet the user
-2. **INTAKE QUESTIONS** → Collect all tax information step by step
+1. **WELCOME** → FIRST call 'render_welcome_ui' to show the home screen with selection options. Let the user choose.
+2. **INTAKE QUESTIONS** → When user selects intake, call 'start_intake' then collect all tax information step by step
 3. **SUMMARY REVIEW** → Show summary using 'get_client_summary', ask for confirmation
 4. **SUMMARY CONFIRMATION** → Wait for user to confirm (use 'confirm_intake_summary' when they do)
 5. **DOCUMENT CHECKLIST** → Generate checklist using 'generate_document_checklist'
@@ -1057,7 +1057,7 @@ TaxPilot uses a defined conversation flow that MUST be followed in order. After 
 - Accept SSN, bank details, AGI directly when provided
 - Process all data immediately using available tools
 
-Start by using 'start_intake' to begin the session. The flow will guide you from there.`,
+Start by calling 'render_welcome_ui' to show the home screen. When the user picks an option, the flow will guide you from there.`,
             },
           },
         ],

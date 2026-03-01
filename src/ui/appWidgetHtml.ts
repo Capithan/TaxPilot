@@ -597,6 +597,49 @@ var _clientId = '';
 var _stepIndex = 0;
 var _collected = {};   // { stepId: { formData/selection/selections } }
 var _wizardActive = false;
+var _welcomeShown = false; // Track whether the welcome screen is showing
+
+/** Build the welcome / home screen with selection options */
+function buildWelcomeUI() {
+  var comps = [];
+  comps.push({ type: 'banner', text: 'Welcome to H&R Block TaxPilot', variant: 'info', icon: '\\uD83D\\uDC4B', confetti: true });
+  comps.push({ type: 'text_block', text: 'Fast, guided intake built for ChatGPT.', style: 'heading' });
+  comps.push({ type: 'text_block', text: 'Start with the guided intake, or jump to documents and booking.', style: 'body' });
+  comps.push({ type: 'step_progress', steps: [
+    { id: 'intake', label: 'Intake', status: 'active' },
+    { id: 'documents', label: 'Docs', status: 'upcoming' },
+    { id: 'match', label: 'Match', status: 'upcoming' },
+    { id: 'book', label: 'Book', status: 'upcoming' },
+    { id: 'reminders', label: 'Reminders', status: 'upcoming' }
+  ]});
+  comps.push({ type: 'selection_card', title: 'What do you want to do?', options: [
+    { id: 'start_intake', label: 'Start guided intake', description: 'Collect everything in one flow', icon: '\\uD83E\\uDDED', badge: 'Recommended',
+      action: { type: 'tool_call', tool: '_local_start_intake', parameters: {} } },
+    { id: 'documents', label: 'See my document list', description: 'Personalized checklist and reminders', icon: '\\uD83D\\uDCCB',
+      action: { type: 'tool_call', tool: 'generate_document_checklist', parameters: {} } },
+    { id: 'routing', label: 'Match me to a tax pro', description: 'Get the right expert for your situation', icon: '\\uD83D\\uDC69\\u200D\\uD83D\\uDCBC',
+      action: { type: 'tool_call', tool: 'route_to_tax_pro', parameters: {} } },
+    { id: 'questions', label: 'Ask a quick question', description: 'Chat without starting intake', icon: '\\uD83D\\uDCAC' }
+  ], action: { type: 'tool_call', tool: '_local_start_intake', parameters: {} } });
+  comps.push({ type: 'info_card', title: 'Built-in guardrails', fields: [
+    { label: 'Flow aware', value: '10-stage flow with progress', icon: '\\uD83E\\uDDED' },
+    { label: 'UI-first', value: 'Structured cards and forms', icon: '\\uD83E\\uDDE9' },
+    { label: 'Reminders', value: 'Auto-create checklist nudges', icon: '\\uD83D\\uDD14' },
+    { label: 'Scheduling', value: 'Book with the best tax pro', icon: '\\uD83D\\uDCC5' }
+  ], highlight: 'Tip: use the buttons above to launch the right flow instantly.' });
+  comps.push({ type: 'button', label: '\\uD83D\\uDE80 Start guided intake', variant: 'primary', size: 'lg',
+    action: { type: 'tool_call', tool: '_local_start_intake', parameters: {} } });
+  comps.push({ type: 'button', label: '\\uD83D\\uDCCA Resume where I left off', variant: 'secondary', size: 'lg',
+    action: { type: 'tool_call', tool: 'get_conversation_flow', parameters: {} } });
+  return { screen: 'home', components: comps };
+}
+
+/** Show the welcome screen */
+function showWelcome() {
+  _welcomeShown = true;
+  _wizardActive = false;
+  render(buildWelcomeUI());
+}
 
 var STEPS = [
   { id: 'personal_info', title: 'Personal Information', type: 'form',
@@ -1085,6 +1128,25 @@ document.getElementById('content').addEventListener('click', function(e) {
         try {
           var optAction = JSON.parse(selItem.dataset.selectAction);
           if (optAction.tool) {
+            // Welcome intercept: _local_start_intake transitions from welcome to wizard
+            if (optAction.tool === '_local_start_intake') {
+              _welcomeShown = false;
+              if (_serverUrl) {
+                restCallTool('start_intake', {}).then(function(resp) {
+                  var rsid = '';
+                  var rcid = '';
+                  if (resp.stateUpdates) { rsid = resp.stateUpdates.sessionId || ''; rcid = resp.stateUpdates.clientId || ''; }
+                  if (!rsid && resp.data) { rsid = resp.data.sessionId || ''; rcid = resp.data.clientId || ''; }
+                  if (!rsid && resp.structuredContent && resp.structuredContent.stateUpdates) {
+                    rsid = resp.structuredContent.stateUpdates.sessionId || '';
+                    rcid = resp.structuredContent.stateUpdates.clientId || '';
+                  }
+                  if (rsid) { _sessionId = rsid; _clientId = rcid || _clientId; }
+                }).catch(function(e) { console.warn('[TP] REST start_intake failed:', e.message || e); });
+              }
+              startWizard(_sessionId, _clientId, 0);
+              return;
+            }
             // Wizard intercept: handle intake steps locally
             if (_wizardActive && optAction.tool === 'process_intake_response' && optAction.parameters && optAction.parameters.step) {
               selItem.style.pointerEvents = 'none'; selItem.style.opacity = '0.6';
@@ -1104,6 +1166,25 @@ document.getElementById('content').addEventListener('click', function(e) {
         try {
           var selAction = JSON.parse(selWrapper.dataset.selAction);
           if (selAction.tool) {
+            // Welcome intercept: _local_start_intake transitions from welcome to wizard
+            if (selAction.tool === '_local_start_intake') {
+              _welcomeShown = false;
+              if (_serverUrl) {
+                restCallTool('start_intake', {}).then(function(resp) {
+                  var rsid = '';
+                  var rcid = '';
+                  if (resp.stateUpdates) { rsid = resp.stateUpdates.sessionId || ''; rcid = resp.stateUpdates.clientId || ''; }
+                  if (!rsid && resp.data) { rsid = resp.data.sessionId || ''; rcid = resp.data.clientId || ''; }
+                  if (!rsid && resp.structuredContent && resp.structuredContent.stateUpdates) {
+                    rsid = resp.structuredContent.stateUpdates.sessionId || '';
+                    rcid = resp.structuredContent.stateUpdates.clientId || '';
+                  }
+                  if (rsid) { _sessionId = rsid; _clientId = rcid || _clientId; }
+                }).catch(function(e) { console.warn('[TP] REST start_intake failed:', e.message || e); });
+              }
+              startWizard(_sessionId, _clientId, 0);
+              return;
+            }
             // Wizard intercept: handle intake steps locally
             if (_wizardActive && selAction.tool === 'process_intake_response' && selAction.parameters && selAction.parameters.step) {
               selItem.style.pointerEvents = 'none'; selItem.style.opacity = '0.6';
@@ -1170,6 +1251,26 @@ document.getElementById('content').addEventListener('click', function(e) {
         saveStepToServer('review', { formData: _collected });
         return;
       }
+      // Welcome intercept: _local_start_intake transitions from welcome to wizard
+      if (btnTool === '_local_start_intake') {
+        _welcomeShown = false;
+        // Kick off start_intake in the background to get sessionId, then start the wizard
+        if (_serverUrl) {
+          restCallTool('start_intake', {}).then(function(resp) {
+            var rsid = '';
+            var rcid = '';
+            if (resp.stateUpdates) { rsid = resp.stateUpdates.sessionId || ''; rcid = resp.stateUpdates.clientId || ''; }
+            if (!rsid && resp.data) { rsid = resp.data.sessionId || ''; rcid = resp.data.clientId || ''; }
+            if (!rsid && resp.structuredContent && resp.structuredContent.stateUpdates) {
+              rsid = resp.structuredContent.stateUpdates.sessionId || '';
+              rcid = resp.structuredContent.stateUpdates.clientId || '';
+            }
+            if (rsid) { _sessionId = rsid; _clientId = rcid || _clientId; }
+          }).catch(function(e) { console.warn('[TP] REST start_intake failed:', e.message || e); });
+        }
+        startWizard(_sessionId, _clientId, 0);
+        return;
+      }
       callToolAndRender(btnTool, btnParams, t, t.textContent);
       return;
     }
@@ -1202,7 +1303,7 @@ var _bridgeReady = (function initializeBridge() {
 
 // ─── Data Sources ────────────────────────────────────────────────────────────
 
-// Initialize wizard: extract sessionId from toolOutput or REST, then start wizard.
+// Initialize: show welcome screen first, start wizard only when user chooses.
 (function initWizard() {
   var to = window.openai && window.openai.toolOutput;
   var sid = '';
@@ -1220,10 +1321,26 @@ var _bridgeReady = (function initializeBridge() {
   }
   console.log('[TP] initWizard: sid=' + sid + ', cid=' + cid + ', hasToolOutput=' + !!to + ', serverUrl=' + _serverUrl);
 
-  // Start wizard immediately with whatever we have (instant UI)
-  startWizard(sid, cid, 0);
+  _sessionId = sid;
+  _clientId = cid;
 
-  // If no sessionId, try REST in background to get one
+  // Check if toolOutput already contains a specific screen to render (e.g. from render_welcome_ui or start_intake)
+  if (to) {
+    var renderData = extractRenderData(to);
+    if (renderData && renderData.screen && renderData.screen !== 'home') {
+      // Server sent a specific non-home screen (e.g. intake already started) — render it
+      render(renderData);
+      if (renderData.screen === 'intake') {
+        _wizardActive = true;
+      }
+      return;
+    }
+  }
+
+  // Default: show the welcome/home selection screen
+  showWelcome();
+
+  // If no sessionId yet, try REST in background so we have one ready when user starts intake
   if (!sid && _serverUrl) {
     restCallTool('start_intake', {}).then(function(resp) {
       var rsid = '';
@@ -1260,8 +1377,8 @@ window.addEventListener('openai:set_globals', function() {
   }
 
   // If wizard is active and no pending non-intake render, skip re-render
-  if (_wizardActive && !_pendingRender) {
-    console.log('[TP] set_globals: wizard active, skipping re-render');
+  if ((_wizardActive || _welcomeShown) && !_pendingRender) {
+    console.log('[TP] set_globals: wizard/welcome active, skipping re-render');
     return;
   }
 
@@ -1294,9 +1411,9 @@ window.addEventListener('message', function(event) {
 
   // MCP Apps bridge notifications
   if (message.method === 'ui/notifications/tool-result') {
-    // If wizard is active and not waiting for a non-intake tool, skip to avoid overwriting wizard UI
-    if (_wizardActive && !_pendingRender) {
-      console.log('[TP] tool-result notification received but wizard active — skipping');
+    // If wizard/welcome is active and not waiting for a non-intake tool, skip to avoid overwriting UI
+    if ((_wizardActive || _welcomeShown) && !_pendingRender) {
+      console.log('[TP] tool-result notification received but wizard/welcome active — skipping');
       // Still extract sessionId if available
       var trData = (message.params && message.params.structuredContent) ? message.params.structuredContent : message.params;
       if (trData && !_sessionId) {
