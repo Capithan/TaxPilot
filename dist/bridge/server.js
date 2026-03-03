@@ -16,15 +16,17 @@ import { formatDocumentChecklist as formatDocChecklistUI, formatDocumentCollecte
 import { formatRoutingResult, formatTaxProRecommendations, formatAppointmentEstimate as formatEstimateUI, formatAppointmentCreated, } from '../ui/formatters/routing.js';
 import { formatRemindersCreated, formatRemindersList, formatReminderSent, formatNotificationSent, } from '../ui/formatters/reminders.js';
 import { formatWelcomeScreen } from '../ui/formatters/welcome.js';
-import { toReadableText } from '../ui/toReadableText.js';
 import { getAppWidgetHtml, APP_WIDGET_MIME_TYPE } from '../ui/appWidgetHtml.js';
 import { uiResponseToStructured } from '../ui/uiResponseToStructured.js';
 /** Wrap a UIResponse into the MCP content block format with structuredContent for Apps SDK widget.
  *  Always converts to StructuredUIResponse format (screen + components[]) so chat.html can render it. */
 function toMcpContent(uiResp) {
-    const readable = toReadableText(uiResp);
     // Ensure the structuredContent is always in StructuredUIResponse format (screen + components[])
     const structured = uiResponseToStructured(uiResp);
+    const screen = typeof structured.screen === 'string' ? structured.screen : null;
+    const readable = screen
+        ? `TaxPilot UI updated (${screen}).`
+        : 'TaxPilot UI updated.';
     return {
         content: [{ type: 'text', text: readable }],
         structuredContent: structured,

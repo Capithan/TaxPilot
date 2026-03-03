@@ -15,7 +15,6 @@ import { formatComplexityScore, formatRoutingResult, formatTaxProRecommendations
 import { formatRemindersCreated, formatRemindersList, formatReminderSent, } from './ui/formatters/reminders.js';
 import { formatFlowStatus, formatFlowAdvanced, formatSummaryConfirmed, formatSchedulingPreferences, formatTaxProSelected, formatFlowProgress, } from './ui/formatters/flow.js';
 import { formatWelcomeScreen } from './ui/formatters/welcome.js';
-import { toReadableText } from './ui/toReadableText.js';
 import { getAppWidgetHtml, APP_WIDGET_MIME_TYPE } from './ui/appWidgetHtml.js';
 /** MCP Apps Widget resource URI */
 const WIDGET_RESOURCE_URI_ROOT = 'ui://taxpilot/widget.html';
@@ -33,7 +32,10 @@ function getWidgetResourceUri() {
 function toMcpContent(uiResp) {
     const sc = uiResp;
     latestToolResult = sc;
-    const readable = toReadableText(sc);
+    const screen = typeof sc.screen === 'string' ? sc.screen : null;
+    const readable = screen
+        ? `TaxPilot UI updated (${screen}).`
+        : 'TaxPilot UI updated.';
     return {
         content: [{ type: 'text', text: readable }],
         structuredContent: sc,
@@ -478,8 +480,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     const tools = rawTools.map(tool => {
         const isRenderTool = tool.name === 'render_welcome_ui';
         const meta = {
-            ui: { resourceUri: getWidgetResourceUri() },
-            'ui/resourceUri': getWidgetResourceUri(),
             'openai/outputTemplate': getWidgetResourceUri(),
             'openai/widgetAccessible': true,
             'openai/toolInvocation/invoking': isRenderTool ? 'Rendering TaxPilot UI…' : 'Working…',

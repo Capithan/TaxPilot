@@ -118,7 +118,10 @@ function getWidgetResourceUri(): string {
 function toMcpContent(uiResp: UIResponse | Record<string, unknown>): { content: Array<{ type: 'text'; text: string }>; structuredContent: Record<string, unknown> } {
   const sc = uiResp as unknown as Record<string, unknown>;
   latestToolResult = sc;
-  const readable = toReadableText(sc);
+  const screen = typeof sc.screen === 'string' ? sc.screen : null;
+  const readable = screen
+    ? `TaxPilot UI updated (${screen}).`
+    : 'TaxPilot UI updated.';
   return {
     content: [{ type: 'text' as const, text: readable }],
     structuredContent: sc,
@@ -576,8 +579,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   const tools = rawTools.map(tool => {
     const isRenderTool = tool.name === 'render_welcome_ui';
     const meta: Record<string, unknown> = {
-      ui: { resourceUri: getWidgetResourceUri() },
-      'ui/resourceUri': getWidgetResourceUri(),
       'openai/outputTemplate': getWidgetResourceUri(),
       'openai/widgetAccessible': true,
       'openai/toolInvocation/invoking': isRenderTool ? 'Rendering TaxPilot UI…' : 'Working…',

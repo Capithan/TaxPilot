@@ -12,9 +12,30 @@
  *   4. Widget JS reads data and renders HRB-branded components
  */
 
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
 export const APP_WIDGET_MIME_TYPE = 'text/html+skybridge';
 
 export function getAppWidgetHtml(): string {
+  // Prefer the checked-in static widget file first. It is easier to reason
+  // about, avoids stale inline template drift, and is the same artifact used
+  // for local debug in `public/taxpilot-widget.html`.
+  try {
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const widgetPath = path.resolve(__dirname, '..', '..', 'public', 'taxpilot-widget.html');
+    if (fs.existsSync(widgetPath)) {
+      const html = fs.readFileSync(widgetPath, 'utf-8');
+      if (html && html.includes('<!DOCTYPE html')) {
+        return html;
+      }
+    }
+  } catch {
+    // Fall through to inline template below.
+  }
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>

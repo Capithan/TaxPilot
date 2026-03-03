@@ -75,9 +75,12 @@ import { uiResponseToStructured } from '../ui/uiResponseToStructured.js';
 /** Wrap a UIResponse into the MCP content block format with structuredContent for Apps SDK widget.
  *  Always converts to StructuredUIResponse format (screen + components[]) so chat.html can render it. */
 function toMcpContent(uiResp: UIResponse | Record<string, unknown>): { content: Array<{ type: string; text: string }>; structuredContent: Record<string, unknown> } {
-  const readable = toReadableText(uiResp as Record<string, unknown>);
   // Ensure the structuredContent is always in StructuredUIResponse format (screen + components[])
   const structured = uiResponseToStructured(uiResp as Record<string, unknown>);
+  const screen = typeof structured.screen === 'string' ? structured.screen : null;
+  const readable = screen
+    ? `TaxPilot UI updated (${screen}).`
+    : 'TaxPilot UI updated.';
   return {
     content: [{ type: 'text', text: readable }],
     structuredContent: structured,
