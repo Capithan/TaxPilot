@@ -98,7 +98,13 @@ import { toReadableText } from './ui/toReadableText.js';
 import { getAppWidgetHtml, APP_WIDGET_MIME_TYPE } from './ui/appWidgetHtml.js';
 
 /** MCP Apps Widget resource URI */
-const WIDGET_RESOURCE_URI_BASE = 'ui://taxpilot/widget.html';
+const WIDGET_RESOURCE_URI_ROOT = 'ui://taxpilot/widget.html';
+const WIDGET_BUILD_ID = encodeURIComponent(
+  process.env.TAXPILOT_WIDGET_BUILD_ID
+    || process.env.WEBSITE_INSTANCE_ID
+    || Date.now().toString(36),
+);
+const WIDGET_RESOURCE_URI_BASE = `${WIDGET_RESOURCE_URI_ROOT}?build=${WIDGET_BUILD_ID}`;
 
 /** Store the latest tool result so the widget can render without the postMessage bridge */
 let latestToolResult: Record<string, unknown> | null = formatWelcomeScreen() as unknown as Record<string, unknown>;
@@ -107,7 +113,7 @@ let toolResultVersion = latestToolResult ? 1 : 0;
 /** Get the current widget resource URI (versioned so ChatGPT fetches fresh HTML) */
 function getWidgetResourceUri(): string {
   return toolResultVersion > 0
-    ? `${WIDGET_RESOURCE_URI_BASE}?v=${toolResultVersion}`
+    ? `${WIDGET_RESOURCE_URI_BASE}&v=${toolResultVersion}`
     : WIDGET_RESOURCE_URI_BASE;
 }
 
@@ -614,7 +620,7 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => {
 server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
   const { uri } = request.params;
   // Accept base URI or any versioned variant (?v=N)
-  if (uri.startsWith(WIDGET_RESOURCE_URI_BASE)) {
+  if (uri.startsWith(WIDGET_RESOURCE_URI_ROOT)) {
     const html = getAppWidgetHtml();
     return {
       contents: [{

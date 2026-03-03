@@ -488,10 +488,15 @@ app.get('/api/tools', (_req: Request, res: Response) => {
 });
 
 // ── MCP Apps Widget Resource URI ────────────────────────────────────────────
-// STATIC URI — must be identical across tools/list, tools/call, resources/list,
-// and resources/read so ChatGPT reuses the same widget iframe and updates
-// window.openai.toolOutput in-place instead of creating new widgets.
-const WIDGET_RESOURCE_URI = 'ui://taxpilot/widget.html';
+// Keep URI stable per server process, but include a build token so ChatGPT
+// does not keep serving a stale cached widget after a deployment/restart.
+const WIDGET_RESOURCE_URI_ROOT = 'ui://taxpilot/widget.html';
+const WIDGET_BUILD_ID = encodeURIComponent(
+  process.env.TAXPILOT_WIDGET_BUILD_ID
+    || process.env.WEBSITE_INSTANCE_ID
+    || Date.now().toString(36),
+);
+const WIDGET_RESOURCE_URI = `${WIDGET_RESOURCE_URI_ROOT}?build=${WIDGET_BUILD_ID}`;
 const WIDGET_MIME_TYPE = APP_WIDGET_MIME_TYPE;
 
 /**
@@ -941,7 +946,7 @@ function handleMcpPost(req: Request, res: Response) {
   if (method === 'resources/read') {
     const uri = (params?.uri as string) || '';
     // Accept base URI or any versioned variant (ui://taxpilot/widget.html?v=N)
-    if (uri.startsWith(WIDGET_RESOURCE_URI)) {
+    if (uri.startsWith(WIDGET_RESOURCE_URI_ROOT)) {
       try {
         const proto = req.get('x-forwarded-proto') || req.protocol || 'https';
         const host = req.get('host') || 'localhost:8000';
@@ -1196,7 +1201,7 @@ app.post('/messages', (req: Request, res: Response) => {
     case 'resources/read': {
       const readUri = (params?.uri as string) || '';
       // Accept base URI or any versioned variant (ui://taxpilot/widget.html?v=N)
-      if (readUri.startsWith(WIDGET_RESOURCE_URI)) {
+      if (readUri.startsWith(WIDGET_RESOURCE_URI_ROOT)) {
         try {
           const proto = req.get('x-forwarded-proto') || req.protocol || 'https';
           const host = req.get('host') || 'localhost:8000';
