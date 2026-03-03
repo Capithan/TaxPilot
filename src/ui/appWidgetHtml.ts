@@ -590,6 +590,7 @@ var _serverUrl = (typeof __TP_SERVER_URL__ !== 'undefined' && __TP_SERVER_URL__)
 var _pendingRender = false;
 var _pendingBaseToolOutput = null;
 var _pendingBaseToolOutputExpiresAt = 0;
+var _hasOpenAiHost = !!(window.openai && typeof window.openai.callTool === 'function');
 
 // ─── Multi-Step Intake Wizard (fully local navigation) ──────────────────────
 // All step definitions are embedded so the widget never depends on server
@@ -1287,21 +1288,24 @@ document.getElementById('content').addEventListener('click', function(e) {
 
 // ─── MCP Apps Bridge Initialization ──────────────────────────────────────────
 // Per https://developers.openai.com/apps-sdk/build/chatgpt-ui/#use-the-mcp-apps-bridge-recommended
-var _bridgeReady = (function initializeBridge() {
-  function rpcNotify(method, params) {
-    window.parent.postMessage({ jsonrpc: '2.0', method: method, params: params || {} }, '*');
-  }
-  return rpcRequest('ui/initialize', {
-    appInfo: { name: 'taxpilot-widget', version: '1.0.0' },
-    appCapabilities: {},
-    protocolVersion: '2026-01-26',
-  }).then(function() {
-    rpcNotify('ui/notifications/initialized', {});
-    console.log('[TaxPilot] MCP Apps bridge initialized.');
-  }).catch(function(err) {
-    console.warn('[TaxPilot] MCP Apps bridge init skipped (standalone mode):', err);
-  });
-})();
+var _bridgeReady = Promise.resolve(null);
+if (!_hasOpenAiHost) {
+  _bridgeReady = (function initializeBridge() {
+    function rpcNotify(method, params) {
+      window.parent.postMessage({ jsonrpc: '2.0', method: method, params: params || {} }, '*');
+    }
+    return rpcRequest('ui/initialize', {
+      appInfo: { name: 'taxpilot-widget', version: '1.0.0' },
+      appCapabilities: {},
+      protocolVersion: '2026-01-26',
+    }).then(function() {
+      rpcNotify('ui/notifications/initialized', {});
+      console.log('[TaxPilot] MCP Apps bridge initialized.');
+    }).catch(function(err) {
+      console.warn('[TaxPilot] MCP Apps bridge init skipped (standalone mode):', err);
+    });
+  })();
+}
 
 // ─── Data Sources ────────────────────────────────────────────────────────────
 
@@ -1404,6 +1408,7 @@ window.addEventListener('openai:set_globals', function() {
 
 // 3. Listen for MCP Apps bridge notifications AND JSON-RPC responses
 window.addEventListener('message', function(event) {
+  if (_hasOpenAiHost) return;
   if (event.source !== window.parent) return;
   const message = event.data;
   if (!message || message.jsonrpc !== '2.0') return;
