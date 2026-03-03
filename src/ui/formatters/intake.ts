@@ -37,8 +37,13 @@ const ALL_STEP_IDS: IntakeStep[] = [
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function uid(): string {
-  return `ui-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+/** Stable deterministic ID for a given screen + step combination.
+ *  ChatGPT's tree reconciler matches nodes by id — random ids cause
+ *  "Cannot moveNode" errors because the reconciler can't correlate
+ *  old vs new trees. Using a stable id lets reconciliation succeed.
+ */
+function stableId(screen: string, step?: string): string {
+  return step ? `taxpilot-${screen}-${step}` : `taxpilot-${screen}`;
 }
 
 /** Build the step-progress component shown at the top of every intake screen. */
@@ -298,7 +303,7 @@ function buildStructuredResponse(
   components.push(...stepComponents);
 
   return {
-    id: uid(),
+    id: stableId(screen, currentStep),
     screen,
     components,
     stateUpdates: {
@@ -404,7 +409,7 @@ export function formatIntakeResponse(result: {
   // ── Intake completed — celebration! ──────────────────────
   if (result.intakeCompleted) {
     return {
-      id: uid(),
+      id: stableId('summary', 'complete'),
       screen: 'summary',
       components: [
         { type: 'banner', text: 'Congratulations! Your intake is 100% complete.', variant: 'success', icon: '🎉', confetti: true },
@@ -497,7 +502,7 @@ function buildReviewUI(sessionId: string, client: ClientProfile, completedSteps:
   }
 
   return {
-    id: uid(),
+    id: stableId('intake', 'review'),
     screen: 'intake',
     components: [
       { type: 'banner', text: 'Almost done! Please review your information below.', variant: 'info', icon: '📋' },
@@ -540,7 +545,7 @@ export function formatIntakeProgress(progress: {
 } | null, sessionId: string): Record<string, unknown> {
   if (!progress) {
     return {
-      id: uid(),
+      id: stableId('intake', 'error'),
       screen: 'intake',
       components: [
         { type: 'banner', text: 'Session not found. Please start a new intake.', variant: 'error', icon: '❌' },
@@ -570,7 +575,7 @@ export function formatIntakeProgress(progress: {
   });
 
   return {
-    id: uid(),
+    id: stableId('intake', progress.currentStep),
     screen: 'intake',
     components,
     data: {
@@ -663,7 +668,7 @@ export function formatClientSummary(
   );
 
   return {
-    id: uid(),
+    id: stableId('summary', 'client'),
     screen: 'summary',
     components,
     stateUpdates: { screen: 'summary' },

@@ -294,7 +294,7 @@ export class StructuredResponseBuilder {
 
   constructor(screen: SessionScreen, toolName: string) {
     this._resp = {
-      id: `ui-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      id: `taxpilot-${screen}-${toolName}`,
       screen,
       components: [],
       _meta: {

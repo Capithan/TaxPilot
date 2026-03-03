@@ -474,17 +474,48 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
         },
     ];
-    // Inject MCP Apps UI metadata into all tools (versioned URI for fresh HTML)
-    // All tools include openai/outputTemplate so ChatGPT always renders the widget
-    // with the latest structuredContent after each tool call.
+    // Inject MCP Apps UI metadata into tools.
+    //
+    // Following the OpenAI "decoupled pattern" recommendation:
+    //   - Model-facing / render tools get openai/outputTemplate so ChatGPT
+    //     renders the widget when the *model* triggers them.
+    //   - Widget-interactive tools (called from inside the widget via
+    //     window.openai.callTool) do NOT get outputTemplate. The widget
+    //     handles re-rendering internally from the structuredContent.
+    //     Attaching outputTemplate to these tools causes ChatGPT's tree
+    //     reconciler to also try to update the widget externally, producing
+    //     the "Cannot moveNode" error.
+    //
+    // See: https://developers.openai.com/apps-sdk/build/chatgpt-ui/#decoupled-pattern
+    const MODEL_RENDER_TOOLS = new Set([
+        'render_welcome_ui',
+        'start_intake',
+        'get_client_summary',
+        'generate_document_checklist',
+        'get_document_checklist',
+        'get_pending_documents',
+        'get_intake_progress',
+        'list_tax_professionals',
+        'calculate_complexity',
+        'route_to_tax_pro',
+        'get_tax_pro_recommendations',
+        'create_appointment',
+        'get_appointment_estimate',
+        'get_conversation_flow',
+        'get_flow_progress',
+    ]);
     const tools = rawTools.map(tool => {
-        const isRenderTool = tool.name === 'render_welcome_ui';
+        const isRenderTool = MODEL_RENDER_TOOLS.has(tool.name);
         const meta = {
-            'openai/outputTemplate': getWidgetResourceUri(),
             'openai/widgetAccessible': true,
-            'openai/toolInvocation/invoking': isRenderTool ? 'Rendering TaxPilot UI…' : 'Working…',
-            'openai/toolInvocation/invoked': isRenderTool ? 'Rendered TaxPilot UI.' : 'Done.',
+            'openai/toolInvocation/invoking': tool.name === 'render_welcome_ui' ? 'Rendering TaxPilot UI…' : 'Working…',
+            'openai/toolInvocation/invoked': tool.name === 'render_welcome_ui' ? 'Rendered TaxPilot UI.' : 'Done.',
         };
+        // Only model-render tools get the outputTemplate
+        if (isRenderTool) {
+            meta['openai/outputTemplate'] = getWidgetResourceUri();
+            meta.ui = { resourceUri: getWidgetResourceUri() };
+        }
         return {
             ...tool,
             _meta: meta,
@@ -552,9 +583,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             case 'process_intake_response': {
                 const sid = args?.sessionId;
                 const step = args?.step;
-                const formData = args?.formData;
+                let formData = args?.formData;
                 const selection = args?.selection;
                 const selections = args?.selections;
+                // The widget merges form field values as top-level args (not nested
+                // under formData). Detect this case and reconstruct the formData map
+                // so the structured handler receives it correctly.
+                if (step && !formData && !selection && !selections) {
+                    const knownKeys = new Set(['sessionId', 'step', 'answer', 'formData', 'selection', 'selections']);
+                    const extra = {};
+                    let hasExtra = false;
+                    for (const [k, v] of Object.entries(args || {})) {
+                        if (!knownKeys.has(k) && v !== undefined && v !== null) {
+                            extra[k] = String(v);
+                            hasExtra = true;
+                        }
+                    }
+                    if (hasExtra) {
+                        formData = extra;
+                    }
+                }
                 let result;
                 // Prefer structured path when step + form/selection data provided
                 if (step && (formData || selection || selections)) {
@@ -567,7 +615,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 // the first intake step, which looks like "submit does nothing".
                 if (!result.success) {
                     const errUI = {
-                        id: `intake-error-${Date.now()}`,
+                        id: `taxpilot-intake-error`,
                         screen: 'error',
                         components: [
                             {

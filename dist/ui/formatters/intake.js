@@ -29,8 +29,13 @@ const ALL_STEP_IDS = [
     'income_types', 'deductions', 'special_situations', 'document_upload', 'review',
 ];
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-function uid() {
-    return `ui-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+/** Stable deterministic ID for a given screen + step combination.
+ *  ChatGPT's tree reconciler matches nodes by id — random ids cause
+ *  "Cannot moveNode" errors because the reconciler can't correlate
+ *  old vs new trees. Using a stable id lets reconciliation succeed.
+ */
+function stableId(screen, step) {
+    return step ? `taxpilot-${screen}-${step}` : `taxpilot-${screen}`;
 }
 /** Build the step-progress component shown at the top of every intake screen. */
 function buildStepProgress(currentStep, completedSteps) {
@@ -260,7 +265,7 @@ function buildStructuredResponse(screen, toolName, currentStep, completedSteps, 
     // Step-specific components (form, selection card, multi-select, etc.)
     components.push(...stepComponents);
     return {
-        id: uid(),
+        id: stableId(screen, currentStep),
         screen,
         components,
         stateUpdates: {
@@ -335,7 +340,7 @@ export function formatIntakeResponse(result, sessionId, progressInfo) {
     // ── Intake completed — celebration! ──────────────────────
     if (result.intakeCompleted) {
         return {
-            id: uid(),
+            id: stableId('summary', 'complete'),
             screen: 'summary',
             components: [
                 { type: 'banner', text: 'Congratulations! Your intake is 100% complete.', variant: 'success', icon: '🎉', confetti: true },
@@ -416,7 +421,7 @@ function buildReviewUI(sessionId, client, completedSteps) {
         fields.push({ label: 'Special Situations', value: specials.join(', '), icon: '⚠️' });
     }
     return {
-        id: uid(),
+        id: stableId('intake', 'review'),
         screen: 'intake',
         components: [
             { type: 'banner', text: 'Almost done! Please review your information below.', variant: 'info', icon: '📋' },
@@ -452,7 +457,7 @@ function buildReviewUI(sessionId, client, completedSteps) {
 export function formatIntakeProgress(progress, sessionId) {
     if (!progress) {
         return {
-            id: uid(),
+            id: stableId('intake', 'error'),
             screen: 'intake',
             components: [
                 { type: 'banner', text: 'Session not found. Please start a new intake.', variant: 'error', icon: '❌' },
@@ -478,7 +483,7 @@ export function formatIntakeProgress(progress, sessionId) {
         action: toolCallAction('process_intake_response', { sessionId }),
     });
     return {
-        id: uid(),
+        id: stableId('intake', progress.currentStep),
         screen: 'intake',
         components,
         data: {
@@ -559,7 +564,7 @@ export function formatClientSummary(client, summaryText) {
         action: toolCallAction('process_intake_response', { sessionId: '' }),
     });
     return {
-        id: uid(),
+        id: stableId('summary', 'client'),
         screen: 'summary',
         components,
         stateUpdates: { screen: 'summary' },

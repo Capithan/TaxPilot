@@ -39,8 +39,8 @@ const TYPE_TO_SCREEN: Record<string, string> = {
   error: 'home',
 };
 
-function uid(): string {
-  return `ui-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+function stableId(screen: string, toolName?: string): string {
+  return toolName ? `taxpilot-${screen}-${toolName}` : `taxpilot-${screen}`;
 }
 
 /** Convert a UIAction to a button component for the renderer. */
@@ -213,9 +213,10 @@ export function uiResponseToStructured(resp: Record<string, unknown>): Record<st
 
   // Determine screen
   const screen = TYPE_TO_SCREEN[uiResp.type] || 'home';
+  const toolName = uiResp._meta?.toolName || uiResp.type || '';
 
   return {
-    id: uid(),
+    id: stableId(screen, toolName),
     screen,
     components,
     stateUpdates: {
