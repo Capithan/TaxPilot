@@ -676,6 +676,33 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           );
         }
 
+        // Surface session/client errors instead of silently re-rendering
+        // the first intake step, which looks like "submit does nothing".
+        if (!result.success) {
+          const errUI: Record<string, unknown> = {
+            id: `intake-error-${Date.now()}`,
+            screen: 'error',
+            components: [
+              {
+                type: 'banner',
+                text: `⚠️ ${result.message ?? 'Unable to continue this intake session. Please start a new intake.'}`,
+                variant: 'error',
+                icon: '⚠️',
+              },
+              {
+                type: 'button',
+                label: '🔄 Start New Intake',
+                variant: 'primary',
+                action: { type: 'tool_call', tool: 'start_intake', parameters: {} },
+              },
+            ],
+            stateUpdates: { screen: 'error' },
+            data: { sessionId: sid, error: result.message ?? 'intake_processing_failed' },
+            _meta: { toolName: 'process_intake_response', timestamp: new Date().toISOString() },
+          };
+          return toMcpContent(errUI);
+        }
+
         // Check if intake is complete and advance flow
         if (result.intakeCompleted && result.client) {
           const flowState = getOrCreateFlowState(result.client.id, sid);

@@ -586,6 +586,8 @@ var _rpcId = 0;
 var _rpcCallbacks = {};
 var _serverUrl = (typeof __TP_SERVER_URL__ !== 'undefined' && __TP_SERVER_URL__) || document.body.getAttribute('data-server-url') || '';
 var _pendingRender = false;
+var _pendingBaseToolOutput = null;
+var _pendingBaseToolOutputExpiresAt = 0;
 
 // ─── Multi-Step Intake Wizard (fully local navigation) ──────────────────────
 // All step definitions are embedded so the widget never depends on server
@@ -1012,6 +1014,8 @@ function callToolAndRender(toolName, params, btn, origLabel) {
   }
   dbg('callToolAndRender: ' + toolName + ' | serverUrl=' + (_serverUrl || 'EMPTY') + ' | bridge=' + (window.openai && typeof window.openai.callTool));
   var previousToolOutput = window.openai && window.openai.toolOutput;
+  _pendingBaseToolOutput = previousToolOutput || null;
+  _pendingBaseToolOutputExpiresAt = Date.now() + 8000;
 
   callTool(toolName, params).then(function(result) {
     var rtype = typeof result;
@@ -1054,6 +1058,15 @@ function waitForSetGlobals(toolName, params, previousToolOutput, done) {
     done(null);
     modelCallTool(toolName, params);
   }, 3000);
+}
+
+function isStalePendingToolOutput(raw) {
+  return !!(
+    raw &&
+    _pendingBaseToolOutput &&
+    raw === _pendingBaseToolOutput &&
+    Date.now() < _pendingBaseToolOutputExpiresAt
+  );
 }
 
 // ─── Date field auto-format helper (MM/DD/YYYY) ─────────────────────────────
@@ -1353,6 +1366,11 @@ window.addEventListener('openai:set_globals', function() {
   var raw = window.openai && window.openai.toolOutput;
   console.log('[TP] set_globals fired, wizardActive=' + _wizardActive + ', pendingRender=' + _pendingRender);
 
+  if (isStalePendingToolOutput(raw)) {
+    console.log('[TP] set_globals: ignoring stale pre-submit toolOutput');
+    return;
+  }
+
   // Always extract sessionId/clientId if we don't have one yet
   if (raw && !_sessionId) {
     var sid = '';
@@ -1411,6 +1429,10 @@ window.addEventListener('message', function(event) {
       return;
     }
     var ndata = (message.params && message.params.structuredContent) ? message.params.structuredContent : message.params;
+    if (isStalePendingToolOutput(ndata)) {
+      console.log('[TP] tool-result: ignoring stale pre-submit toolOutput');
+      return;
+    }
     var renderData = extractRenderData(ndata) || ndata;
     if (renderData) {
       _pendingRender = false;
