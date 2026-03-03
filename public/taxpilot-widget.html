@@ -377,92 +377,58 @@ body {
   <div class="tp-loading">Loading TaxPilot...</div>
 </div>
 
-<script type="module">
+<script>
 /**
  * TaxPilot MCP Apps Widget
  *
- * Built from scratch following the official OpenAI Apps SDK quickstart pattern:
- *   https://developers.openai.com/apps-sdk/quickstart
- *   https://developers.openai.com/apps-sdk/build/chatgpt-ui/
+ * Rewritten following sebderhy/mcp-app-template pattern:
+ *   - window.openai.toolOutput → initial render (structuredContent from model tool call)
+ *   - openai:set_globals event → re-render when host updates toolOutput
+ *   - window.openai.callTool(name, args) → call tools from widget
+ *   - callTool returns { result: string } which is JSON we parse
+ *   - NO JSON-RPC postMessage bridge (the host handles all MCP bridging)
  *
- * Architecture:
- *   1. Widget always initializes the MCP Apps bridge (ui/initialize).
- *   2. Tool calls go through rpcRequest("tools/call") — the standard bridge.
- *   3. Model-initiated tool results arrive via ui/notifications/tool-result.
- *   4. window.openai.toolOutput is used ONLY for the initial render (compat).
- *   5. openai:set_globals is used ONLY for ChatGPT re-hydration of the initial data.
- *
- * IMPORTANT: We do NOT use window.openai.callTool. Per the decoupled pattern,
- * widget-initiated tool calls use the MCP Apps bridge (tools/call via postMessage)
- * so ChatGPT's tree reconciler is never confused by double renders.
+ * Reference: https://github.com/sebderhy/mcp-app-template
+ *   - src/use-widget-props.ts   → reads window.openai.toolOutput
+ *   - src/use-host-global.ts    → subscribes to openai:set_globals
+ *   - src/boilerplate/App.tsx   → uses window.openai.callTool
+ *   - server/widgets/_base.py   → ui.resourceUri metadata
  */
 
 // ═══════════════════════════════════════════════════════════════════
-// MCP APPS BRIDGE — JSON-RPC 2.0 over postMessage
-// (Follows the official quickstart pattern exactly)
+// TOOL CALL API — uses window.openai.callTool (standard MCP Apps API)
 // ═══════════════════════════════════════════════════════════════════
 
-let rpcId = 0;
-const pendingRequests = new Map();
-
-function rpcNotify(method, params) {
-  window.parent.postMessage({ jsonrpc: '2.0', method, params }, '*');
-}
-
-function rpcRequest(method, params) {
-  return new Promise((resolve, reject) => {
-    const id = ++rpcId;
-    pendingRequests.set(id, { resolve, reject });
-    window.parent.postMessage({ jsonrpc: '2.0', id, method, params }, '*');
-    // Timeout after 30s
-    setTimeout(() => {
-      if (pendingRequests.has(id)) {
-        pendingRequests.delete(id);
-        reject(new Error(`Request ${method} timed out`));
-      }
-    }, 30000);
-  });
-}
-
-/** Call a tool on the MCP server via the host bridge */
+/**
+ * Call an MCP tool from within the widget.
+ * Returns the parsed structured content from the server response.
+ *
+ * Per the reference repo (types.ts):
+ *   callTool returns { result: string } where result is text content.
+ *   Our server puts JSON in the text content, so we parse it.
+ */
 async function callTool(name, args) {
-  return rpcRequest('tools/call', { name, arguments: args || {} });
-}
-
-/** Notify host of widget size change */
-function sendSizeChanged(width, height) {
-  rpcNotify('ui/notifications/size-changed', { width, height });
-}
-
-// Listen for all JSON-RPC messages from the host
-window.addEventListener('message', (event) => {
-  if (event.source !== window.parent) return;
-  const data = event.data;
-  if (!data || typeof data !== 'object' || data.jsonrpc !== '2.0') return;
-
-  // ── JSON-RPC responses (to our rpcRequest calls) ──
-  if (typeof data.id === 'number') {
-    const pending = pendingRequests.get(data.id);
-    if (!pending) return;
-    pendingRequests.delete(data.id);
-    if (data.error) {
-      pending.reject(new Error(data.error.message || 'Unknown error'));
-    } else {
-      pending.resolve(data.result);
+  if (!window.openai || typeof window.openai.callTool !== 'function') {
+    throw new Error('window.openai.callTool is not available');
+  }
+  const response = await window.openai.callTool(name, args || {});
+  // response is { result: string } per the OpenAI Apps SDK
+  // The result string contains our JSON structured content
+  if (response && typeof response.result === 'string') {
+    try {
+      return JSON.parse(response.result);
+    } catch {
+      // If not JSON, return as-is wrapped
+      return { screen: 'message', components: [
+        { type: 'text_block', style: 'body', text: response.result }
+      ]};
     }
-    return;
   }
-
-  // ── JSON-RPC notifications from host ──
-  if (typeof data.method !== 'string') return;
-  const handler = notificationHandlers[data.method];
-  if (handler) {
-    try { handler(data.params || {}); } catch (e) { console.error('[Widget] Notification handler error:', e); }
-  }
-}, { passive: true });
-
-// Notification handlers — populated during init
-const notificationHandlers = {};
+  // Some hosts may return the structured content directly
+  if (response && response.components) return response;
+  if (response && response.structuredContent) return response.structuredContent;
+  return response;
+}
 
 
 // ═══════════════════════════════════════════════════════════════════
@@ -531,7 +497,16 @@ function _uid(prefix) {
 function reportSize() {
   requestAnimationFrame(() => {
     const rect = root.getBoundingClientRect();
-    sendSizeChanged(Math.ceil(rect.width), Math.ceil(rect.height));
+    // Notify host of size change if available
+    if (window.parent !== window) {
+      try {
+        window.parent.postMessage({
+          jsonrpc: '2.0',
+          method: 'ui/notifications/size-changed',
+          params: { width: Math.ceil(rect.width), height: Math.ceil(rect.height) },
+        }, '*');
+      } catch {}
+    }
   });
 }
 
@@ -580,19 +555,6 @@ function renderPayload(payload) {
     renderResponse(payload);
   } else {
     renderRawData(payload);
-  }
-}
-
-/** Update from a tool-call response (has structuredContent + content) */
-function updateFromResponse(response) {
-  if (response?.structuredContent) {
-    renderPayload(response.structuredContent);
-  } else if (response?.content && Array.isArray(response.content)) {
-    const tc = response.content.find(c => c.type === 'text');
-    if (tc) {
-      try { renderPayload(JSON.parse(tc.text)); }
-      catch { root.innerHTML = `<div class="tp-text tp-text--body" style="padding:16px">${esc(tc.text)}</div>`; }
-    }
   }
 }
 
@@ -758,11 +720,14 @@ function renderFormGroup(c) {
       baseArgs.formData = values;
 
       try {
-        const response = await callTool(
+        const result = await callTool(
           submitDef.toolName || submitDef.tool,
           baseArgs,
         );
-        updateFromResponse(response);
+        // callTool returns parsed structured content directly
+        if (result && (result.components || result.screen)) {
+          renderPayload(result);
+        }
       } catch (err) {
         console.error('[Widget] Form submit failed:', err);
         btn.disabled = false;
@@ -825,11 +790,13 @@ function renderMultiSelect(c) {
       baseArgs.selections = selected;
 
       try {
-        const response = await callTool(
+        const result = await callTool(
           submitDef.toolName || submitDef.tool,
           baseArgs,
         );
-        updateFromResponse(response);
+        if (result && (result.components || result.screen)) {
+          renderPayload(result);
+        }
       } catch (err) {
         console.error('[Widget] Multi-select submit failed:', err);
         btn.disabled = false;
@@ -861,8 +828,10 @@ function renderSelectionCard(c) {
           const toolName = c.action.toolName || c.action.tool;
           if (toolName) {
             try {
-              const response = await callTool(toolName, baseArgs);
-              updateFromResponse(response);
+              const result = await callTool(toolName, baseArgs);
+              if (result && (result.components || result.screen)) {
+                renderPayload(result);
+              }
             } catch (err) {
               console.error('[Widget] Selection failed:', err);
             }
@@ -1027,14 +996,14 @@ async function handleAction(action) {
 
       const loadingEl = document.createElement('div');
       loadingEl.className = 'tp-loading';
-      loadingEl.textContent = `Calling ${toolName}\u2026`;
+      loadingEl.textContent = `Loading\u2026`;
       root.appendChild(loadingEl);
 
       try {
-        const response = await callTool(toolName, toolArgs);
-        // callTool via rpcRequest("tools/call") returns the tool result
-        if (response && (response.structuredContent || response.content)) {
-          updateFromResponse(response);
+        const result = await callTool(toolName, toolArgs);
+        // callTool returns parsed structured content
+        if (result && (result.components || result.screen)) {
+          renderPayload(result);
         } else {
           loadingEl.remove();
         }
@@ -1051,14 +1020,9 @@ async function handleAction(action) {
     }
 
     case 'send_message': {
-      // MCP Apps bridge: ui/message
-      try {
-        rpcNotify('ui/message', {
-          role: 'user',
-          content: [{ type: 'text', text: action.message }],
-        });
-      } catch {
-        console.log('[Widget] Send message:', action.message);
+      // Use the standard MCP Apps API
+      if (window.openai && typeof window.openai.sendFollowUpMessage === 'function') {
+        window.openai.sendFollowUpMessage({ prompt: action.message });
       }
       break;
     }
@@ -1073,72 +1037,55 @@ async function handleAction(action) {
 
 // ═══════════════════════════════════════════════════════════════════
 // INITIALIZATION
-// Following the official OpenAI quickstart pattern:
-//   1. Always initialize the MCP Apps bridge.
-//   2. Listen for ui/notifications/tool-result for model-initiated updates.
-//   3. Use window.openai.toolOutput only for the initial render.
-//   4. Listen for openai:set_globals for ChatGPT re-hydration only.
+// Following sebderhy/mcp-app-template pattern:
+//   1. window.openai.toolOutput → initial render
+//   2. openai:set_globals event → re-render on host updates
+//   3. window.openai.callTool → widget-initiated tool calls
+//   No JSON-RPC bridge needed — the host manages all MCP bridging.
 // ═══════════════════════════════════════════════════════════════════
 
-// ── Register notification handlers ──────────────────────────────
-
-// When the model calls a tool and ChatGPT delivers the result:
-notificationHandlers['ui/notifications/tool-result'] = (params) => {
-  updateFromResponse(params);
-};
-
-// Tool cancelled by host:
-notificationHandlers['ui/notifications/tool-cancelled'] = (params) => {
-  root.innerHTML = `<div class="tp-banner tp-banner--warning"><span class="tp-banner-icon">⚠️</span><span class="tp-banner-text">${esc(params.reason || 'Operation cancelled')}</span></div>`;
-};
-
-// Host theme changed:
-notificationHandlers['ui/notifications/host-context-changed'] = (params) => {
-  if (params.styles && params.styles.variables) {
-    for (const [key, value] of Object.entries(params.styles.variables)) {
-      if (value) document.documentElement.style.setProperty(key, value);
-    }
-  }
-};
-
-// ── ChatGPT compat: openai:set_globals for re-hydration ────────
+// ── Listen for openai:set_globals (host updates toolOutput) ─────
+// Per use-host-global.ts from the reference repo: the host fires this
+// CustomEvent whenever any global property changes (toolOutput, theme, etc.)
 window.addEventListener('openai:set_globals', (event) => {
-  const output = event?.detail?.globals?.toolOutput ?? window.openai?.toolOutput;
-  if (output) renderPayload(output);
+  const globals = event && event.detail && event.detail.globals;
+  if (!globals) return;
+
+  // Re-render whenever toolOutput changes
+  const output = globals.toolOutput || (window.openai && window.openai.toolOutput);
+  if (output) {
+    renderPayload(output);
+  }
+
+  // Apply theme changes
+  if (globals.theme) {
+    document.documentElement.setAttribute('data-theme', globals.theme);
+  }
 }, { passive: true });
 
-// ── Render initial toolOutput if available (ChatGPT sync API) ──
-if (window.openai?.toolOutput) {
+// ── Render initial toolOutput if available ──────────────────────
+// Per use-widget-props.ts: reads window.openai.toolOutput directly
+if (window.openai && window.openai.toolOutput) {
   renderPayload(window.openai.toolOutput);
 } else {
-  // Show ready state while waiting for bridge init
+  // Show welcome/ready state
   root.innerHTML = `<div class="tp-structured" style="align-items:center;text-align:center;gap:14px;padding:20px 12px">
     <div style="width:60px;height:60px;border-radius:16px;background:var(--hrb-green);color:#fff;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:900;box-shadow:0 4px 14px rgba(0,161,58,0.3)">H</div>
     <div>
       <div class="tp-text tp-text--heading">TaxPilot by H&amp;R Block</div>
       <div class="tp-text tp-text--body" style="margin-top:4px;max-width:320px">Your AI-powered tax preparation assistant.</div>
     </div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center">
+      <span style="padding:5px 12px;border-radius:20px;font-size:12px;font-weight:600;background:var(--hrb-green-light);color:var(--hrb-green-dark)">📋 Guided Intake</span>
+      <span style="padding:5px 12px;border-radius:20px;font-size:12px;font-weight:600;background:var(--hrb-green-light);color:var(--hrb-green-dark)">📄 Document Checklist</span>
+      <span style="padding:5px 12px;border-radius:20px;font-size:12px;font-weight:600;background:var(--hrb-green-light);color:var(--hrb-green-dark)">👨‍💼 Tax Pro Matching</span>
+      <span style="padding:5px 12px;border-radius:20px;font-size:12px;font-weight:600;background:var(--hrb-green-light);color:var(--hrb-green-dark)">📅 Scheduling</span>
+    </div>
+    <div style="font-size:12px;color:var(--hrb-text-muted);background:var(--hrb-beige);padding:10px 16px;border-radius:8px;width:100%;line-height:1.6">
+      <strong>Try saying:</strong> "Start my tax intake" · "Show my document checklist" · "Find a tax professional"
+    </div>
   </div>`;
 }
-
-// ── Always initialize the MCP Apps bridge ───────────────────────
-// This is critical — per the quickstart, the bridge must be initialized
-// even when window.openai exists, because tools/call goes through it.
-const initializeBridge = async () => {
-  try {
-    await rpcRequest('ui/initialize', {
-      appInfo: { name: 'taxpilot-widget', version: '1.0.0' },
-      appCapabilities: {},
-      protocolVersion: '2026-01-26',
-    });
-    rpcNotify('ui/notifications/initialized', {});
-    console.log('[Widget] MCP Apps bridge initialized');
-  } catch (err) {
-    console.warn('[Widget] Bridge init failed (standalone mode):', err.message);
-  }
-};
-
-initializeBridge();
 </script>
 </body>
 </html>

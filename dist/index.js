@@ -28,16 +28,20 @@ let latestToolResult = formatWelcomeScreen();
 function getWidgetResourceUri() {
     return WIDGET_RESOURCE_URI_BASE;
 }
-/** Wrap a UIResponse into the MCP content block format with structuredContent for Apps SDK. */
+/**
+ * Wrap a UIResponse into the MCP CallToolResult format.
+ *
+ * Per the sebderhy/mcp-app-template reference:
+ *   - content[0].text must contain the data as JSON because
+ *     window.openai.callTool returns { result: string } where result = text content.
+ *   - structuredContent carries the same data for model-initiated renders
+ *     (host delivers it to the widget as toolOutput).
+ */
 function toMcpContent(uiResp) {
     const sc = uiResp;
     latestToolResult = sc;
-    const screen = typeof sc.screen === 'string' ? sc.screen : null;
-    const readable = screen
-        ? `TaxPilot UI updated (${screen}).`
-        : 'TaxPilot UI updated.';
     return {
-        content: [{ type: 'text', text: readable }],
+        content: [{ type: 'text', text: JSON.stringify(sc) }],
         structuredContent: sc,
     };
 }
@@ -504,22 +508,24 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         'get_conversation_flow',
         'get_flow_progress',
     ]);
+    // Following the sebderhy/mcp-app-template _base.py pattern:
+    //   - Model-render tools: _meta.ui.resourceUri links to the widget
+    //   - Widget-interactive tools (data-only): NO _meta.ui at all
+    //     so the host doesn't try to re-render the widget externally
     const tools = rawTools.map(tool => {
         const isRenderTool = MODEL_RENDER_TOOLS.has(tool.name);
-        const meta = {
-            'openai/widgetAccessible': true,
-            'openai/toolInvocation/invoking': tool.name === 'render_welcome_ui' ? 'Rendering TaxPilot UI…' : 'Working…',
-            'openai/toolInvocation/invoked': tool.name === 'render_welcome_ui' ? 'Rendered TaxPilot UI.' : 'Done.',
-        };
-        // Only model-render tools get the outputTemplate
         if (isRenderTool) {
-            meta['openai/outputTemplate'] = getWidgetResourceUri();
-            meta.ui = { resourceUri: getWidgetResourceUri() };
+            return {
+                ...tool,
+                _meta: {
+                    ui: {
+                        resourceUri: getWidgetResourceUri(),
+                    },
+                },
+            };
         }
-        return {
-            ...tool,
-            _meta: meta,
-        };
+        // Widget-interactive / data-only tools — no UI metadata
+        return { ...tool };
     });
     return { tools };
 });
@@ -533,8 +539,9 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => {
                 mimeType: APP_WIDGET_MIME_TYPE,
                 description: 'H&R Block TaxPilot interactive UI widget — renders intake forms, document checklists, tax pro cards, and appointment summaries.',
                 _meta: {
-                    'openai/outputTemplate': WIDGET_RESOURCE_URI_BASE,
-                    ui: { prefersBorder: true },
+                    ui: {
+                        resourceUri: getWidgetResourceUri(),
+                    },
                 },
             }],
     };
@@ -553,11 +560,9 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
                     mimeType: APP_WIDGET_MIME_TYPE,
                     text: html,
                     _meta: {
-                        'openai/outputTemplate': WIDGET_RESOURCE_URI_BASE,
-                        'openai/toolInvocation/invoking': 'Rendering TaxPilot…',
-                        'openai/toolInvocation/invoked': 'TaxPilot ready',
-                        'openai/widgetAccessible': true,
-                        ui: { prefersBorder: true },
+                        ui: {
+                            resourceUri: getWidgetResourceUri(),
+                        },
                     },
                 }],
         };
