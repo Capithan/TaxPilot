@@ -918,6 +918,10 @@ app.get('/sse', (req, res) => {
     res.setHeader('X-Accel-Buffering', 'no');
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.flushHeaders();
+    // Some proxies (including certain Azure/IIS configurations) buffer small chunks
+    // and won't deliver *any* bytes to the client until a threshold is reached.
+    // Send an initial padded SSE comment to force the first flush.
+    res.write(`:${' '.repeat(2048)}\n\n`);
     // Generate session ID using crypto
     const sessionId = crypto.randomUUID();
     const messagesUrl = `https://${req.get('host')}/messages?sessionId=${sessionId}`;
@@ -957,6 +961,8 @@ app.get('/mcp', (req, res) => {
     res.setHeader('X-Accel-Buffering', 'no');
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.flushHeaders();
+    // See /sse handler — force an initial flush to defeat proxy buffering.
+    res.write(`:${' '.repeat(2048)}\n\n`);
     const sessionId = crypto.randomUUID();
     const messagesUrl = `https://${req.get('host')}/messages?sessionId=${sessionId}`;
     sseSessions.set(sessionId, res);
