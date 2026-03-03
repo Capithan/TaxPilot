@@ -600,6 +600,15 @@ var _welcomeShown = false; // Track whether the welcome screen is showing
 /** Build the welcome / home screen with selection options */
 function buildWelcomeUI() {
   var comps = [];
+  var docsAction = _clientId
+    ? { type: 'tool_call', tool: 'generate_document_checklist', parameters: { clientId: _clientId } }
+    : { type: 'tool_call', tool: '_local_start_intake', parameters: {} };
+  var routingAction = _clientId
+    ? { type: 'tool_call', tool: 'route_to_tax_pro', parameters: { clientId: _clientId } }
+    : { type: 'tool_call', tool: '_local_start_intake', parameters: {} };
+  var resumeAction = _clientId
+    ? { type: 'tool_call', tool: 'get_conversation_flow', parameters: { clientId: _clientId } }
+    : { type: 'tool_call', tool: '_local_start_intake', parameters: {} };
   comps.push({ type: 'banner', text: 'Welcome to H&R Block TaxPilot', variant: 'info', icon: '\\uD83D\\uDC4B', confetti: true });
   comps.push({ type: 'text_block', text: 'Fast, guided intake built for ChatGPT.', style: 'heading' });
   comps.push({ type: 'text_block', text: 'Start with the guided intake, or jump to documents and booking.', style: 'body' });
@@ -614,9 +623,9 @@ function buildWelcomeUI() {
     { id: 'start_intake', label: 'Start guided intake', description: 'Collect everything in one flow', icon: '\\uD83E\\uDDED', badge: 'Recommended',
       action: { type: 'tool_call', tool: '_local_start_intake', parameters: {} } },
     { id: 'documents', label: 'See my document list', description: 'Personalized checklist and reminders', icon: '\\uD83D\\uDCCB',
-      action: { type: 'tool_call', tool: 'generate_document_checklist', parameters: {} } },
+      action: docsAction },
     { id: 'routing', label: 'Match me to a tax pro', description: 'Get the right expert for your situation', icon: '\\uD83D\\uDC69\\u200D\\uD83D\\uDCBC',
-      action: { type: 'tool_call', tool: 'route_to_tax_pro', parameters: {} } },
+      action: routingAction },
     { id: 'questions', label: 'Ask a quick question', description: 'Chat without starting intake', icon: '\\uD83D\\uDCAC' }
   ], action: { type: 'tool_call', tool: '_local_start_intake', parameters: {} } });
   comps.push({ type: 'info_card', title: 'Built-in guardrails', fields: [
@@ -628,7 +637,7 @@ function buildWelcomeUI() {
   comps.push({ type: 'button', label: '\\uD83D\\uDE80 Start guided intake', variant: 'primary', size: 'lg',
     action: { type: 'tool_call', tool: '_local_start_intake', parameters: {} } });
   comps.push({ type: 'button', label: '\\uD83D\\uDCCA Resume where I left off', variant: 'secondary', size: 'lg',
-    action: { type: 'tool_call', tool: 'get_conversation_flow', parameters: {} } });
+    action: resumeAction });
   return { screen: 'home', components: comps };
 }
 
@@ -808,7 +817,7 @@ function buildCompleteUI() {
   comps.push({ type: 'banner', text: 'A matching tax professional will be assigned to you shortly.', variant: 'info', icon: '\uD83D\uDC68\u200D\uD83D\uDCBC' });
   if (_clientId) {
     comps.push({ type: 'button', label: '\uD83D\uDC68\u200D\uD83D\uDCBC Find My Tax Pro', variant: 'primary', size: 'lg',
-      action: { type: 'tool_call', tool: 'match_tax_pro', parameters: { clientId: _clientId } } });
+      action: { type: 'tool_call', tool: 'route_to_tax_pro', parameters: { clientId: _clientId } } });
     comps.push({ type: 'button', label: '\uD83D\uDCC4 Generate Full Document Checklist', variant: 'secondary', size: 'lg',
       action: { type: 'tool_call', tool: 'generate_document_checklist', parameters: { clientId: _clientId } } });
   }
@@ -968,6 +977,8 @@ function callToolAndRender(toolName, params, btn, origLabel) {
     var overlay = document.getElementById('tp-loading-overlay');
     if (overlay) overlay.remove();
     if (data) {
+      _wizardActive = false;
+      _welcomeShown = !!(data && data.screen === 'home');
       render(data);
       var root = document.getElementById('widget-root');
       if (root) root.scrollTop = 0;
@@ -1000,6 +1011,7 @@ function callToolAndRender(toolName, params, btn, origLabel) {
     if (_dbg) { _dbg.style.display = 'block'; _dbg.innerHTML += esc(msg) + '<br>'; _dbg.scrollTop = _dbg.scrollHeight; }
   }
   dbg('callToolAndRender: ' + toolName + ' | serverUrl=' + (_serverUrl || 'EMPTY') + ' | bridge=' + (window.openai && typeof window.openai.callTool));
+  var previousToolOutput = window.openai && window.openai.toolOutput;
 
   callTool(toolName, params).then(function(result) {
     var rtype = typeof result;
@@ -1011,11 +1023,14 @@ function callToolAndRender(toolName, params, btn, origLabel) {
     // Tool resolved but no renderable data — check toolOutput then wait for set_globals
     dbg('No renderable data in response — checking toolOutput');
     var to = window.openai && window.openai.toolOutput;
-    if (to) { var d = extractRenderData(to); if (d) { dbg('toolOutput had data!'); done(d); return; } }
+    if (to && to !== previousToolOutput) {
+      var d = extractRenderData(to);
+      if (d) { dbg('toolOutput had fresh data!'); done(d); return; }
+    }
 
     // Wait briefly for set_globals (ChatGPT may push updated data)
     dbg('Waiting for set_globals...');
-    waitForSetGlobals(toolName, params, done);
+    waitForSetGlobals(toolName, params, previousToolOutput, done);
   }).catch(function(err) {
     dbg('callTool FAILED: ' + (err.message || err));
     console.error('[TP] callTool failed:', toolName, err);
@@ -1026,13 +1041,15 @@ function callToolAndRender(toolName, params, btn, origLabel) {
 }
 
 /** Wait briefly for set_globals, then fall back to model prompt */
-function waitForSetGlobals(toolName, params, done) {
+function waitForSetGlobals(toolName, params, previousToolOutput, done) {
   console.log('[TP] Waiting 3s for set_globals\u2026');
   setTimeout(function() {
     if (!_pendingRender) return; // already rendered by set_globals listener
     var to = window.openai && window.openai.toolOutput;
-    var data = to ? extractRenderData(to) : null;
-    if (data) { done(data); return; }
+    if (to && to !== previousToolOutput) {
+      var data = extractRenderData(to);
+      if (data) { done(data); return; }
+    }
     console.warn('[TP] No data after all tiers \u2014 falling back to model');
     done(null);
     modelCallTool(toolName, params);
@@ -1129,20 +1146,11 @@ document.getElementById('content').addEventListener('click', function(e) {
             // Welcome intercept: _local_start_intake transitions from welcome to wizard
             if (optAction.tool === '_local_start_intake') {
               _welcomeShown = false;
-              if (_serverUrl) {
-                restCallTool('start_intake', {}).then(function(resp) {
-                  var rsid = '';
-                  var rcid = '';
-                  if (resp.stateUpdates) { rsid = resp.stateUpdates.sessionId || ''; rcid = resp.stateUpdates.clientId || ''; }
-                  if (!rsid && resp.data) { rsid = resp.data.sessionId || ''; rcid = resp.data.clientId || ''; }
-                  if (!rsid && resp.structuredContent && resp.structuredContent.stateUpdates) {
-                    rsid = resp.structuredContent.stateUpdates.sessionId || '';
-                    rcid = resp.structuredContent.stateUpdates.clientId || '';
-                  }
-                  if (rsid) { _sessionId = rsid; _clientId = rcid || _clientId; }
-                }).catch(function(e) { console.warn('[TP] REST start_intake failed:', e.message || e); });
+              if (!_serverUrl && !(window.openai && typeof window.openai.callTool === 'function')) {
+                startWizard(_sessionId, _clientId, 0);
+                return;
               }
-              startWizard(_sessionId, _clientId, 0);
+              callToolAndRender('start_intake', {}, null, null);
               return;
             }
             // Wizard intercept: handle intake steps locally
@@ -1167,20 +1175,11 @@ document.getElementById('content').addEventListener('click', function(e) {
             // Welcome intercept: _local_start_intake transitions from welcome to wizard
             if (selAction.tool === '_local_start_intake') {
               _welcomeShown = false;
-              if (_serverUrl) {
-                restCallTool('start_intake', {}).then(function(resp) {
-                  var rsid = '';
-                  var rcid = '';
-                  if (resp.stateUpdates) { rsid = resp.stateUpdates.sessionId || ''; rcid = resp.stateUpdates.clientId || ''; }
-                  if (!rsid && resp.data) { rsid = resp.data.sessionId || ''; rcid = resp.data.clientId || ''; }
-                  if (!rsid && resp.structuredContent && resp.structuredContent.stateUpdates) {
-                    rsid = resp.structuredContent.stateUpdates.sessionId || '';
-                    rcid = resp.structuredContent.stateUpdates.clientId || '';
-                  }
-                  if (rsid) { _sessionId = rsid; _clientId = rcid || _clientId; }
-                }).catch(function(e) { console.warn('[TP] REST start_intake failed:', e.message || e); });
+              if (!_serverUrl && !(window.openai && typeof window.openai.callTool === 'function')) {
+                startWizard(_sessionId, _clientId, 0);
+                return;
               }
-              startWizard(_sessionId, _clientId, 0);
+              callToolAndRender('start_intake', {}, null, null);
               return;
             }
             // Wizard intercept: handle intake steps locally
@@ -1252,21 +1251,11 @@ document.getElementById('content').addEventListener('click', function(e) {
       // Welcome intercept: _local_start_intake transitions from welcome to wizard
       if (btnTool === '_local_start_intake') {
         _welcomeShown = false;
-        // Kick off start_intake in the background to get sessionId, then start the wizard
-        if (_serverUrl) {
-          restCallTool('start_intake', {}).then(function(resp) {
-            var rsid = '';
-            var rcid = '';
-            if (resp.stateUpdates) { rsid = resp.stateUpdates.sessionId || ''; rcid = resp.stateUpdates.clientId || ''; }
-            if (!rsid && resp.data) { rsid = resp.data.sessionId || ''; rcid = resp.data.clientId || ''; }
-            if (!rsid && resp.structuredContent && resp.structuredContent.stateUpdates) {
-              rsid = resp.structuredContent.stateUpdates.sessionId || '';
-              rcid = resp.structuredContent.stateUpdates.clientId || '';
-            }
-            if (rsid) { _sessionId = rsid; _clientId = rcid || _clientId; }
-          }).catch(function(e) { console.warn('[TP] REST start_intake failed:', e.message || e); });
+        if (!_serverUrl && !(window.openai && typeof window.openai.callTool === 'function')) {
+          startWizard(_sessionId, _clientId, 0);
+          return;
         }
-        startWizard(_sessionId, _clientId, 0);
+        callToolAndRender('start_intake', {}, t, t.textContent);
         return;
       }
       callToolAndRender(btnTool, btnParams, t, t.textContent);
@@ -1327,10 +1316,9 @@ var _bridgeReady = (function initializeBridge() {
     var renderData = extractRenderData(to);
     if (renderData && renderData.screen && renderData.screen !== 'home') {
       // Server sent a specific non-home screen (e.g. intake already started) — render it
+      _wizardActive = false;
+      _welcomeShown = false;
       render(renderData);
-      if (renderData.screen === 'intake') {
-        _wizardActive = true;
-      }
       return;
     }
   }
@@ -1374,9 +1362,9 @@ window.addEventListener('openai:set_globals', function() {
     if (sid) { _sessionId = sid; _clientId = cid || _clientId; console.log('[TP] Got sessionId from set_globals:', sid); }
   }
 
-  // If wizard is active and no pending non-intake render, skip re-render
-  if ((_wizardActive || _welcomeShown) && !_pendingRender) {
-    console.log('[TP] set_globals: wizard/welcome active, skipping re-render');
+  // If local wizard is active and no pending non-intake render, skip re-render
+  if (_wizardActive && !_pendingRender) {
+    console.log('[TP] set_globals: local wizard active, skipping re-render');
     return;
   }
 
@@ -1384,6 +1372,8 @@ window.addEventListener('openai:set_globals', function() {
   var data = raw ? (extractRenderData(raw) || raw) : null;
   if (data) {
     _pendingRender = false;
+    _wizardActive = false;
+    _welcomeShown = !!(data && data.screen === 'home');
     var overlay = document.getElementById('tp-loading-overlay');
     if (overlay) overlay.remove();
     render(data);
@@ -1409,9 +1399,9 @@ window.addEventListener('message', function(event) {
 
   // MCP Apps bridge notifications
   if (message.method === 'ui/notifications/tool-result') {
-    // If wizard/welcome is active and not waiting for a non-intake tool, skip to avoid overwriting UI
-    if ((_wizardActive || _welcomeShown) && !_pendingRender) {
-      console.log('[TP] tool-result notification received but wizard/welcome active — skipping');
+    // If local wizard is active and not waiting for a non-intake tool, skip to avoid overwriting UI
+    if (_wizardActive && !_pendingRender) {
+      console.log('[TP] tool-result notification received but local wizard is active — skipping');
       // Still extract sessionId if available
       var trData = (message.params && message.params.structuredContent) ? message.params.structuredContent : message.params;
       if (trData && !_sessionId) {
@@ -1424,6 +1414,8 @@ window.addEventListener('message', function(event) {
     var renderData = extractRenderData(ndata) || ndata;
     if (renderData) {
       _pendingRender = false;
+      _wizardActive = false;
+      _welcomeShown = !!(renderData && renderData.screen === 'home');
       var ov = document.getElementById('tp-loading-overlay');
       if (ov) ov.remove();
       render(renderData);
