@@ -381,18 +381,18 @@ body {
 /**
  * TaxPilot MCP Apps Widget
  *
- * Rewritten following sebderhy/mcp-app-template pattern:
+ * Follows sebderhy/mcp-app-template EXACTLY:
  *   - window.openai.toolOutput → initial render (structuredContent from model tool call)
  *   - openai:set_globals event → re-render when host updates toolOutput
- *   - window.openai.callTool(name, args) → call tools from widget
- *   - callTool returns { result: string } which is JSON we parse
- *   - NO JSON-RPC postMessage bridge (the host handles all MCP bridging)
+ *   - window.openai.callTool(name, args) → triggers tool, host updates toolOutput
+ *   - callTool returns { result: string } but we DON'T render from it
+ *   - The host sees _meta.ui.resourceUri in the tool result and updates toolOutput
  *
  * Reference: https://github.com/sebderhy/mcp-app-template
  *   - src/use-widget-props.ts   → reads window.openai.toolOutput
  *   - src/use-host-global.ts    → subscribes to openai:set_globals
- *   - src/boilerplate/App.tsx   → uses window.openai.callTool
- *   - server/widgets/_base.py   → ui.resourceUri metadata
+ *   - src/boilerplate/App.tsx   → uses window.openai.callTool (just logs result)
+ *   - server/widgets/_base.py   → get_invocation_meta returns ui.resourceUri+csp
  */
 
 // ═══════════════════════════════════════════════════════════════════
@@ -401,33 +401,37 @@ body {
 
 /**
  * Call an MCP tool from within the widget.
- * Returns the parsed structured content from the server response.
  *
- * Per the reference repo (types.ts):
- *   callTool returns { result: string } where result is text content.
- *   Our server puts JSON in the text content, so we parse it.
+ * Per reference (boilerplate/App.tsx): callTool returns { result: string }
+ * The widget does NOT render from this result. Instead:
+ *   1. The host receives the server's CallToolResult (with _meta.ui.resourceUri)
+ *   2. The host updates window.openai.toolOutput with the new structuredContent
+ *   3. The host fires openai:set_globals
+ *   4. Our set_globals listener re-renders from toolOutput
+ *
+ * We return the result for logging/debugging only.
  */
 async function callTool(name, args) {
+  console.log('[TaxPilot] callTool:', name, args);
+
   if (!window.openai || typeof window.openai.callTool !== 'function') {
     throw new Error('window.openai.callTool is not available');
   }
+
   const response = await window.openai.callTool(name, args || {});
-  // response is { result: string } per the OpenAI Apps SDK
-  // The result string contains our JSON structured content
-  if (response && typeof response.result === 'string') {
-    try {
-      return JSON.parse(response.result);
-    } catch {
-      // If not JSON, return as-is wrapped
-      return { screen: 'message', components: [
-        { type: 'text_block', style: 'body', text: response.result }
-      ]};
-    }
-  }
-  // Some hosts may return the structured content directly
-  if (response && response.components) return response;
-  if (response && response.structuredContent) return response.structuredContent;
+  console.log('[TaxPilot] callTool response:', response);
+
+  // The host should update toolOutput automatically via set_globals.
+  // Return the response for fallback rendering if needed.
   return response;
+}
+
+/**
+ * Read the current toolOutput from the host.
+ * Per use-widget-props.ts: reads window.openai.toolOutput directly.
+ */
+function getToolOutput() {
+  return (window.openai && window.openai.toolOutput) || null;
 }
 
 
@@ -514,6 +518,7 @@ function reportSize() {
 
 function renderResponse(response) {
   if (!response) return;
+  console.log('[TaxPilot] renderResponse:', response.screen || 'unknown');
   if (response.stateUpdates) sessionState.update(response.stateUpdates);
 
   let components = response.components;
@@ -709,31 +714,76 @@ function renderFormGroup(c) {
 
       // Build a tool_call action from submitAction or action
       const submitDef = c.submitAction || c.action;
-      if (!submitDef) return;
+      if (!submitDef) {
+        console.warn('[TaxPilot] No submitAction/action on form group');
+        return;
+      }
+
+      const toolName = submitDef.toolName || submitDef.tool;
+      if (!toolName) {
+        console.warn('[TaxPilot] No tool name in submitAction:', submitDef);
+        return;
+      }
 
       // Disable button and show spinner
       btn.disabled = true;
       btn.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,0.4);border-top-color:#fff;border-radius:50%;animation:tpSpin 0.6s linear infinite;vertical-align:middle;margin-right:6px"></span>Sending\u2026';
 
       // Merge form values into tool args and nest under formData for the server
-      const baseArgs = { ...(submitDef.toolArgs || submitDef.parameters || {}) };
-      baseArgs.formData = values;
+      const toolArgs = { ...(submitDef.toolArgs || submitDef.parameters || {}) };
+      toolArgs.formData = values;
+
+      console.log('[TaxPilot] Form submit:', toolName, toolArgs);
 
       try {
-        const result = await callTool(
-          submitDef.toolName || submitDef.tool,
-          baseArgs,
-        );
-        // callTool returns parsed structured content directly
-        if (result && (result.components || result.screen)) {
-          renderPayload(result);
+        // Fire the tool call. The host will:
+        //   1. Route it to the MCP server
+        //   2. Get back CallToolResult with structuredContent + _meta.ui.resourceUri
+        //   3. Update window.openai.toolOutput with the new structuredContent
+        //   4. Fire openai:set_globals → our listener re-renders
+        const response = await callTool(toolName, toolArgs);
+
+        // FALLBACK: If the host didn't update toolOutput (set_globals handles it),
+        // check if toolOutput was updated directly
+        setTimeout(() => {
+          const output = getToolOutput();
+          if (output && output !== _lastRenderedPayload) {
+            console.log('[TaxPilot] Fallback: rendering from updated toolOutput');
+            renderPayload(output);
+          }
+        }, 500);
+
+        // FALLBACK 2: Try to parse callTool result text directly
+        if (response && typeof response.result === 'string') {
+          try {
+            const parsed = JSON.parse(response.result);
+            if (parsed && (parsed.components || parsed.screen)) {
+              console.log('[TaxPilot] Fallback: rendering from callTool result text');
+              renderPayload(parsed);
+              return;
+            }
+          } catch { /* not JSON, that's fine — host should handle via toolOutput */ }
         }
+
+        // FALLBACK 3: response might be the structured content directly
+        if (response && (response.components || response.screen)) {
+          console.log('[TaxPilot] Fallback: rendering from callTool response directly');
+          renderPayload(response);
+          return;
+        }
+
+        if (response && response.structuredContent) {
+          console.log('[TaxPilot] Fallback: rendering from structuredContent');
+          renderPayload(response.structuredContent);
+          return;
+        }
+
       } catch (err) {
-        console.error('[Widget] Form submit failed:', err);
+        console.error('[TaxPilot] Form submit failed:', err);
         btn.disabled = false;
         btn.textContent = submitLabel;
         root.insertAdjacentHTML('beforeend',
-          `<div class="tp-banner tp-banner--error"><span class="tp-banner-icon">⚠️</span><span class="tp-banner-text">Error: ${esc(err.message)}</span></div>`);
+          `<div class="tp-banner tp-banner--error"><span class="tp-banner-icon">\u26A0\uFE0F</span><span class="tp-banner-text">Error: ${esc(err.message)}</span></div>`);
       }
     });
   });
@@ -783,22 +833,37 @@ function renderMultiSelect(c) {
       const submitDef = c.submitAction || c.action;
       if (!submitDef) return;
 
+      const toolName = submitDef.toolName || submitDef.tool;
+      if (!toolName) return;
+
       btn.disabled = true;
       btn.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,0.4);border-top-color:#fff;border-radius:50%;animation:tpSpin 0.6s linear infinite;vertical-align:middle;margin-right:6px"></span>Sending\u2026';
 
-      const baseArgs = { ...(submitDef.toolArgs || submitDef.parameters || {}) };
-      baseArgs.selections = selected;
+      const toolArgs = { ...(submitDef.toolArgs || submitDef.parameters || {}) };
+      toolArgs.selections = selected;
+
+      console.log('[TaxPilot] Multi-select submit:', toolName, toolArgs);
 
       try {
-        const result = await callTool(
-          submitDef.toolName || submitDef.tool,
-          baseArgs,
-        );
-        if (result && (result.components || result.screen)) {
-          renderPayload(result);
+        const response = await callTool(toolName, toolArgs);
+
+        // Same fallback chain as form group
+        setTimeout(() => {
+          const output = getToolOutput();
+          if (output && output !== _lastRenderedPayload) renderPayload(output);
+        }, 500);
+
+        if (response && typeof response.result === 'string') {
+          try {
+            const parsed = JSON.parse(response.result);
+            if (parsed && (parsed.components || parsed.screen)) { renderPayload(parsed); return; }
+          } catch {}
         }
+        if (response && (response.components || response.screen)) { renderPayload(response); return; }
+        if (response && response.structuredContent) { renderPayload(response.structuredContent); return; }
+
       } catch (err) {
-        console.error('[Widget] Multi-select submit failed:', err);
+        console.error('[TaxPilot] Multi-select submit failed:', err);
         btn.disabled = false;
         btn.textContent = c.submitLabel || 'Continue';
       }
@@ -822,19 +887,36 @@ function renderSelectionCard(c) {
       if (optEl) optEl.addEventListener('click', async () => {
         optEl.closest('.tp-sel-options').querySelectorAll('.tp-sopt--selected').forEach(s => s.classList.remove('tp-sopt--selected'));
         optEl.classList.add('tp-sopt--selected');
+
         if (c.action) {
-          const baseArgs = { ...(c.action.toolArgs || c.action.parameters || {}) };
-          baseArgs.selection = opt.id;
           const toolName = c.action.toolName || c.action.tool;
-          if (toolName) {
-            try {
-              const result = await callTool(toolName, baseArgs);
-              if (result && (result.components || result.screen)) {
-                renderPayload(result);
-              }
-            } catch (err) {
-              console.error('[Widget] Selection failed:', err);
+          if (!toolName) return;
+
+          const toolArgs = { ...(c.action.toolArgs || c.action.parameters || {}) };
+          toolArgs.selection = opt.id;
+
+          console.log('[TaxPilot] Selection:', toolName, toolArgs);
+
+          try {
+            const response = await callTool(toolName, toolArgs);
+
+            // Fallback chain
+            setTimeout(() => {
+              const output = getToolOutput();
+              if (output && output !== _lastRenderedPayload) renderPayload(output);
+            }, 500);
+
+            if (response && typeof response.result === 'string') {
+              try {
+                const parsed = JSON.parse(response.result);
+                if (parsed && (parsed.components || parsed.screen)) { renderPayload(parsed); return; }
+              } catch {}
             }
+            if (response && (response.components || response.screen)) { renderPayload(response); return; }
+            if (response && response.structuredContent) { renderPayload(response.structuredContent); return; }
+
+          } catch (err) {
+            console.error('[TaxPilot] Selection failed:', err);
           }
         }
       });
@@ -855,7 +937,7 @@ function renderStatusBadge(c) {
 function renderStepProgress(c) {
   const steps = (c.steps || []).map((s, i) => {
     const cls = s.status === 'done' ? 'tp-step--done' : s.status === 'active' ? 'tp-step--active' : 'tp-step--upcoming';
-    const icon = s.status === 'done' ? (s.icon || '✓') : String(i + 1);
+    const icon = s.status === 'done' ? (s.icon || '\u2713') : String(i + 1);
     const line = i < (c.steps || []).length - 1
       ? `<div class="tp-step-line ${s.status === 'done' ? 'tp-step-line--done' : ''}"></div>` : '';
     return `<div class="tp-step ${cls}"><div class="tp-step-dot">${icon}</div><div class="tp-step-label">${esc(s.label)}</div></div>${line}`;
@@ -886,26 +968,26 @@ function renderAppointmentSummary(c) {
   const pro = c.taxPro || {};
   const client = c.client || {};
   const confId = c.confirmationId ? `<div class="tp-appt-confid">Confirmation: <strong>${esc(c.confirmationId)}</strong></div>` : '';
-  const stars = '★'.repeat(Math.floor(pro.rating || 0)) + (pro.rating % 1 >= 0.5 ? '½' : '');
+  const stars = '\u2605'.repeat(Math.floor(pro.rating || 0)) + (pro.rating % 1 >= 0.5 ? '\u00BD' : '');
   const specs = (pro.specializations || []).map(s => `<span class="tp-badge tp-badge--info">${esc(s)}</span>`).join(' ');
   const actions = (c.actions || []).map(a => renderComponent(a)).join('');
 
   return `<div class="tp-appt-summary">${confId}
     <div class="tp-appt-sections">
       <div class="tp-appt-section">
-        <div class="tp-appt-section-title">📅 Appointment Details</div>
-        ${apt.date ? `<div class="tp-cardfield"><span class="tp-cardfield-icon">📆</span><span class="tp-cardfield-label">Date</span><span class="tp-cardfield-value">${esc(apt.date)}</span></div>` : ''}
-        ${apt.time ? `<div class="tp-cardfield"><span class="tp-cardfield-icon">🕐</span><span class="tp-cardfield-label">Time</span><span class="tp-cardfield-value">${esc(apt.time)}</span></div>` : ''}
-        ${apt.duration ? `<div class="tp-cardfield"><span class="tp-cardfield-icon">⏱</span><span class="tp-cardfield-label">Duration</span><span class="tp-cardfield-value">${esc(apt.duration)}</span></div>` : ''}
-        ${apt.type ? `<div class="tp-cardfield"><span class="tp-cardfield-icon">${apt.type === 'Virtual' ? '💻' : '🏢'}</span><span class="tp-cardfield-label">Type</span><span class="tp-cardfield-value">${esc(apt.type)}</span></div>` : ''}
-        ${apt.location ? `<div class="tp-cardfield"><span class="tp-cardfield-icon">📍</span><span class="tp-cardfield-label">Location</span><span class="tp-cardfield-value">${esc(apt.location)}</span></div>` : ''}
+        <div class="tp-appt-section-title">\uD83D\uDCC5 Appointment Details</div>
+        ${apt.date ? `<div class="tp-cardfield"><span class="tp-cardfield-icon">\uD83D\uDCC6</span><span class="tp-cardfield-label">Date</span><span class="tp-cardfield-value">${esc(apt.date)}</span></div>` : ''}
+        ${apt.time ? `<div class="tp-cardfield"><span class="tp-cardfield-icon">\uD83D\uDD50</span><span class="tp-cardfield-label">Time</span><span class="tp-cardfield-value">${esc(apt.time)}</span></div>` : ''}
+        ${apt.duration ? `<div class="tp-cardfield"><span class="tp-cardfield-icon">\u23F1</span><span class="tp-cardfield-label">Duration</span><span class="tp-cardfield-value">${esc(apt.duration)}</span></div>` : ''}
+        ${apt.type ? `<div class="tp-cardfield"><span class="tp-cardfield-icon">${apt.type === 'Virtual' ? '\uD83D\uDCBB' : '\uD83C\uDFE2'}</span><span class="tp-cardfield-label">Type</span><span class="tp-cardfield-value">${esc(apt.type)}</span></div>` : ''}
+        ${apt.location ? `<div class="tp-cardfield"><span class="tp-cardfield-icon">\uD83D\uDCCD</span><span class="tp-cardfield-label">Location</span><span class="tp-cardfield-value">${esc(apt.location)}</span></div>` : ''}
       </div>
       <div class="tp-appt-section">
-        <div class="tp-appt-section-title">👨‍💼 Your Tax Professional</div>
+        <div class="tp-appt-section-title">\uD83D\uDC68\u200D\uD83D\uDCBC Your Tax Professional</div>
         <div class="tp-appt-pro-header"><div><div class="tp-appt-pro-name">${esc(pro.name || '')}</div><div class="tp-appt-pro-title">${esc(pro.title || '')}</div><div class="tp-appt-pro-rating"><span class="tp-stars">${stars}</span> ${pro.rating || ''}</div></div></div>
         <div class="tp-appt-pro-specs">${specs}</div>
       </div>
-      ${client.name ? `<div class="tp-appt-section"><div class="tp-appt-section-title">👤 Client</div><div class="tp-cardfield"><span class="tp-cardfield-label">Name</span><span class="tp-cardfield-value">${esc(client.name)}</span></div>${client.documentStatus ? `<div class="tp-cardfield"><span class="tp-cardfield-label">Documents</span><span class="tp-cardfield-value">${esc(client.documentStatus)}</span></div>` : ''}</div>` : ''}
+      ${client.name ? `<div class="tp-appt-section"><div class="tp-appt-section-title">\uD83D\uDC64 Client</div><div class="tp-cardfield"><span class="tp-cardfield-label">Name</span><span class="tp-cardfield-value">${esc(client.name)}</span></div>${client.documentStatus ? `<div class="tp-cardfield"><span class="tp-cardfield-label">Documents</span><span class="tp-cardfield-value">${esc(client.documentStatus)}</span></div>` : ''}</div>` : ''}
     </div>
     ${actions ? `<div class="tp-appt-actions">${actions}</div>` : ''}
   </div>`;
@@ -914,11 +996,11 @@ function renderAppointmentSummary(c) {
 // ─── Tax Pro Card ──────────────────────────────────────────────
 function renderTaxProCard(c) {
   const pro = c.taxPro || {};
-  const recommended = c.recommended ? '<div class="tp-pro-recommended">⭐ Best Match</div>' : '';
+  const recommended = c.recommended ? '<div class="tp-pro-recommended">\u2B50 Best Match</div>' : '';
   const reason = c.matchReason ? `<div class="tp-pro-reason">${esc(c.matchReason)}</div>` : '';
-  const stars = '★'.repeat(Math.floor(pro.rating || 0)) + ((pro.rating || 0) % 1 >= 0.5 ? '½' : '');
+  const stars = '\u2605'.repeat(Math.floor(pro.rating || 0)) + ((pro.rating || 0) % 1 >= 0.5 ? '\u00BD' : '');
   const specs = (pro.specializations || []).map(s => `<span class="tp-badge tp-badge--info">${esc(s)}</span>`).join(' ');
-  const avail = pro.availability ? `<div class="tp-pro-avail">📅 ${esc(pro.availability)}</div>` : '';
+  const avail = pro.availability ? `<div class="tp-pro-avail">\uD83D\uDCC5 ${esc(pro.availability)}</div>` : '';
   const actions = (c.actions || []).map(a => renderComponent(a)).join('');
 
   return `<div class="tp-pro-card ${c.recommended ? 'tp-pro-card--recommended' : ''}">
@@ -935,7 +1017,7 @@ function renderChecklist(c) {
   const counter = c.counter ? `<span class="tp-checklist-counter">${c.counter.done}/${c.counter.total}</span>` : '';
   const items = (c.items || []).map(item => {
     const statusCls = item.status === 'collected' ? 'tp-chk--done' : item.status === 'pending' ? 'tp-chk--pending' : 'tp-chk--required';
-    const statusIcon = item.status === 'collected' ? '✓' : item.status === 'pending' ? '○' : '!';
+    const statusIcon = item.status === 'collected' ? '\u2713' : item.status === 'pending' ? '\u25CB' : '!';
     const desc = item.description ? `<div class="tp-chk-desc">${esc(item.description)}</div>` : '';
     const actions = (item.actions || []).map(a => renderComponent(a)).join('');
     return `<div class="tp-chk-item ${statusCls}"><div class="tp-chk-status">${statusIcon}</div><div class="tp-chk-body"><div class="tp-chk-text">${esc(item.text)}</div>${desc}</div>${actions ? `<div class="tp-chk-actions">${actions}</div>` : ''}</div>`;
@@ -987,32 +1069,49 @@ function renderCarousel(c) {
 // ─── Action handler ────────────────────────────────────────────
 async function handleAction(action) {
   if (!action) return;
+  console.log('[TaxPilot] handleAction:', action.type, action);
 
   switch (action.type) {
     case 'tool_call': {
       const toolName = action.toolName || action.tool;
       const toolArgs = action.toolArgs || action.parameters || {};
-      if (!toolName) return;
+      if (!toolName) {
+        console.warn('[TaxPilot] No tool name in action:', action);
+        return;
+      }
 
       const loadingEl = document.createElement('div');
       loadingEl.className = 'tp-loading';
-      loadingEl.textContent = `Loading\u2026`;
+      loadingEl.textContent = 'Loading\u2026';
       root.appendChild(loadingEl);
 
       try {
-        const result = await callTool(toolName, toolArgs);
-        // callTool returns parsed structured content
-        if (result && (result.components || result.screen)) {
-          renderPayload(result);
-        } else {
-          loadingEl.remove();
+        const response = await callTool(toolName, toolArgs);
+
+        // Fallback chain (same as form group)
+        setTimeout(() => {
+          const output = getToolOutput();
+          if (output && output !== _lastRenderedPayload) renderPayload(output);
+        }, 500);
+
+        if (response && typeof response.result === 'string') {
+          try {
+            const parsed = JSON.parse(response.result);
+            if (parsed && (parsed.components || parsed.screen)) { renderPayload(parsed); return; }
+          } catch {}
         }
+        if (response && (response.components || response.screen)) { renderPayload(response); return; }
+        if (response && response.structuredContent) { renderPayload(response.structuredContent); return; }
+
+        // If no fallback rendered, remove loading
+        loadingEl.remove();
+
       } catch (err) {
-        console.error('[Widget] Tool call failed:', err);
+        console.error('[TaxPilot] Tool call failed:', err);
         loadingEl.remove();
         root.insertAdjacentHTML('beforeend',
           `<div class="tp-banner tp-banner--error">
-            <span class="tp-banner-icon">⚠️</span>
+            <span class="tp-banner-icon">\u26A0\uFE0F</span>
             <span class="tp-banner-text">Failed: ${esc(err.message)}</span>
           </div>`);
       }
@@ -1037,55 +1136,85 @@ async function handleAction(action) {
 
 // ═══════════════════════════════════════════════════════════════════
 // INITIALIZATION
-// Following sebderhy/mcp-app-template pattern:
+// Following sebderhy/mcp-app-template pattern EXACTLY:
 //   1. window.openai.toolOutput → initial render
-//   2. openai:set_globals event → re-render on host updates
+//   2. openai:set_globals event → re-render when host updates toolOutput
 //   3. window.openai.callTool → widget-initiated tool calls
-//   No JSON-RPC bridge needed — the host manages all MCP bridging.
+//
+// Per use-host-global.ts: host fires 'openai:set_globals' CustomEvent
+//   whenever any global changes. We check if 'toolOutput' was one
+//   of the changed keys and read from window.openai.toolOutput.
+//
+// Per use-widget-props.ts: reads window.openai.toolOutput directly.
 // ═══════════════════════════════════════════════════════════════════
 
-// ── Listen for openai:set_globals (host updates toolOutput) ─────
-// Per use-host-global.ts from the reference repo: the host fires this
-// CustomEvent whenever any global property changes (toolOutput, theme, etc.)
-window.addEventListener('openai:set_globals', (event) => {
-  const globals = event && event.detail && event.detail.globals;
-  if (!globals) return;
+// Track last rendered payload to avoid no-op re-renders
+let _lastRenderedPayload = null;
 
-  // Re-render whenever toolOutput changes
-  const output = globals.toolOutput || (window.openai && window.openai.toolOutput);
-  if (output) {
-    renderPayload(output);
+function renderIfNew(payload) {
+  if (!payload) return;
+  if (payload === _lastRenderedPayload) return; // same object, skip
+  _lastRenderedPayload = payload;
+  renderPayload(payload);
+}
+
+// ── Listen for openai:set_globals ───────────────────────────────
+// Per use-host-global.ts: when the event fires, the value is already
+//   set on window.openai[key]. We just need to read and re-render.
+window.addEventListener('openai:set_globals', function(event) {
+  console.log('[TaxPilot] openai:set_globals fired');
+
+  var globals = event && event.detail && event.detail.globals;
+  if (!globals) {
+    console.log('[TaxPilot] set_globals: no globals in event');
+    return;
+  }
+
+  // If toolOutput was updated, re-render from window.openai.toolOutput
+  // (the canonical source, per use-widget-props.ts)
+  if ('toolOutput' in globals || globals.toolOutput !== undefined) {
+    var output = window.openai && window.openai.toolOutput;
+    if (output) {
+      console.log('[TaxPilot] set_globals: rendering from updated toolOutput');
+      renderIfNew(output);
+    }
   }
 
   // Apply theme changes
   if (globals.theme) {
     document.documentElement.setAttribute('data-theme', globals.theme);
   }
-}, { passive: true });
+}, false);
 
 // ── Render initial toolOutput if available ──────────────────────
 // Per use-widget-props.ts: reads window.openai.toolOutput directly
+console.log('[TaxPilot] Init: window.openai =', typeof window.openai, window.openai ? Object.keys(window.openai) : 'N/A');
+
 if (window.openai && window.openai.toolOutput) {
+  console.log('[TaxPilot] Init: rendering from toolOutput');
   renderPayload(window.openai.toolOutput);
 } else {
+  console.log('[TaxPilot] Init: no toolOutput, showing welcome');
   // Show welcome/ready state
-  root.innerHTML = `<div class="tp-structured" style="align-items:center;text-align:center;gap:14px;padding:20px 12px">
-    <div style="width:60px;height:60px;border-radius:16px;background:var(--hrb-green);color:#fff;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:900;box-shadow:0 4px 14px rgba(0,161,58,0.3)">H</div>
-    <div>
-      <div class="tp-text tp-text--heading">TaxPilot by H&amp;R Block</div>
-      <div class="tp-text tp-text--body" style="margin-top:4px;max-width:320px">Your AI-powered tax preparation assistant.</div>
-    </div>
-    <div style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center">
-      <span style="padding:5px 12px;border-radius:20px;font-size:12px;font-weight:600;background:var(--hrb-green-light);color:var(--hrb-green-dark)">📋 Guided Intake</span>
-      <span style="padding:5px 12px;border-radius:20px;font-size:12px;font-weight:600;background:var(--hrb-green-light);color:var(--hrb-green-dark)">📄 Document Checklist</span>
-      <span style="padding:5px 12px;border-radius:20px;font-size:12px;font-weight:600;background:var(--hrb-green-light);color:var(--hrb-green-dark)">👨‍💼 Tax Pro Matching</span>
-      <span style="padding:5px 12px;border-radius:20px;font-size:12px;font-weight:600;background:var(--hrb-green-light);color:var(--hrb-green-dark)">📅 Scheduling</span>
-    </div>
-    <div style="font-size:12px;color:var(--hrb-text-muted);background:var(--hrb-beige);padding:10px 16px;border-radius:8px;width:100%;line-height:1.6">
-      <strong>Try saying:</strong> "Start my tax intake" · "Show my document checklist" · "Find a tax professional"
-    </div>
-  </div>`;
+  root.innerHTML = '<div class="tp-structured" style="align-items:center;text-align:center;gap:14px;padding:20px 12px">' +
+    '<div style="width:60px;height:60px;border-radius:16px;background:var(--hrb-green);color:#fff;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:900;box-shadow:0 4px 14px rgba(0,161,58,0.3)">H</div>' +
+    '<div>' +
+      '<div class="tp-text tp-text--heading">TaxPilot by H&amp;R Block</div>' +
+      '<div class="tp-text tp-text--body" style="margin-top:4px;max-width:320px">Your AI-powered tax preparation assistant.</div>' +
+    '</div>' +
+    '<div style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center">' +
+      '<span style="padding:5px 12px;border-radius:20px;font-size:12px;font-weight:600;background:var(--hrb-green-light);color:var(--hrb-green-dark)">\uD83D\uDCCB Guided Intake</span>' +
+      '<span style="padding:5px 12px;border-radius:20px;font-size:12px;font-weight:600;background:var(--hrb-green-light);color:var(--hrb-green-dark)">\uD83D\uDCC4 Document Checklist</span>' +
+      '<span style="padding:5px 12px;border-radius:20px;font-size:12px;font-weight:600;background:var(--hrb-green-light);color:var(--hrb-green-dark)">\uD83D\uDC68\u200D\uD83D\uDCBC Tax Pro Matching</span>' +
+      '<span style="padding:5px 12px;border-radius:20px;font-size:12px;font-weight:600;background:var(--hrb-green-light);color:var(--hrb-green-dark)">\uD83D\uDCC5 Scheduling</span>' +
+    '</div>' +
+    '<div style="font-size:12px;color:var(--hrb-text-muted);background:var(--hrb-beige);padding:10px 16px;border-radius:8px;width:100%;line-height:1.6">' +
+      '<strong>Try saying:</strong> &quot;Start my tax intake&quot; &middot; &quot;Show my document checklist&quot; &middot; &quot;Find a tax professional&quot;' +
+    '</div>' +
+  '</div>';
 }
+
+console.log('[TaxPilot] Widget initialized');
 </script>
 </body>
 </html>

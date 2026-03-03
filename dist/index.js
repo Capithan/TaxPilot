@@ -24,25 +24,72 @@ const WIDGET_BUILD_ID = encodeURIComponent(process.env.TAXPILOT_WIDGET_BUILD_ID
 const WIDGET_RESOURCE_URI_BASE = `${WIDGET_RESOURCE_URI_ROOT}?build=${WIDGET_BUILD_ID}`;
 /** Store the latest tool result so the widget can render without the postMessage bridge */
 let latestToolResult = formatWelcomeScreen();
-/** Keep outputTemplate/resource URI stable for ChatGPT tree reconciliation. */
+/** Keep resource URI stable for ChatGPT tree reconciliation. */
 function getWidgetResourceUri() {
     return WIDGET_RESOURCE_URI_BASE;
+}
+/**
+ * CSP domains for the MCP Apps sandbox.
+ * Per sebderhy/mcp-app-template _base.py get_csp_domains().
+ * Our widget is fully self-contained (inline JS/CSS) so we use
+ * the deployment URL as the only resource/connect domain.
+ */
+function getCspDomains() {
+    const origin = process.env.WEBSITE_HOSTNAME
+        ? `https://${process.env.WEBSITE_HOSTNAME}`
+        : process.env.BASE_URL || '';
+    const resourceDomains = origin ? [origin] : [];
+    const connectDomains = origin ? [origin] : [];
+    return { resourceDomains, connectDomains };
+}
+/**
+ * Return MCP Apps metadata for tool definitions.
+ * Per sebderhy/mcp-app-template _base.py get_tool_meta().
+ * The key field is ui.resourceUri which links the tool to its UI resource.
+ */
+function getToolMeta() {
+    return {
+        ui: {
+            resourceUri: getWidgetResourceUri(),
+            csp: getCspDomains(),
+        },
+    };
+}
+/**
+ * Return metadata for tool invocation results.
+ * Per sebderhy/mcp-app-template _base.py get_invocation_meta().
+ * This tells the host which widget to update with the new structuredContent.
+ */
+function getInvocationMeta() {
+    return {
+        ui: {
+            resourceUri: getWidgetResourceUri(),
+            csp: getCspDomains(),
+        },
+    };
 }
 /**
  * Wrap a UIResponse into the MCP CallToolResult format.
  *
  * Per the sebderhy/mcp-app-template reference:
- *   - content[0].text must contain the data as JSON because
- *     window.openai.callTool returns { result: string } where result = text content.
- *   - structuredContent carries the same data for model-initiated renders
- *     (host delivers it to the widget as toolOutput).
+ *   - content[0].text is a human-readable summary (shown in chat text)
+ *   - structuredContent carries the actual data (host delivers as toolOutput)
+ *   - _meta.ui.resourceUri tells the host which widget to update
+ *
+ * When the widget calls window.openai.callTool, the host:
+ *   1. Routes the call to the MCP server
+ *   2. Gets back this CallToolResult
+ *   3. Sees _meta.ui.resourceUri and updates window.openai.toolOutput
+ *   4. Fires openai:set_globals so the widget re-renders
  */
 function toMcpContent(uiResp) {
     const sc = uiResp;
     latestToolResult = sc;
+    const screen = typeof sc.screen === 'string' ? sc.screen : 'update';
     return {
-        content: [{ type: 'text', text: JSON.stringify(sc) }],
+        content: [{ type: 'text', text: `TaxPilot: ${screen}` }],
         structuredContent: sc,
+        _meta: getInvocationMeta(),
     };
 }
 // Create the MCP server
@@ -508,24 +555,35 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         'get_conversation_flow',
         'get_flow_progress',
     ]);
-    // Following the sebderhy/mcp-app-template _base.py pattern:
-    //   - Model-render tools: _meta.ui.resourceUri links to the widget
-    //   - Widget-interactive tools (data-only): NO _meta.ui at all
-    //     so the host doesn't try to re-render the widget externally
+    // Following the sebderhy/mcp-app-template pattern:
+    //   - Model-render tools: _meta with ui.resourceUri + csp (host renders widget)
+    //   - Widget-interactive tools: registered but NO _meta.ui
+    //     They're called via window.openai.callTool from within the widget.
+    //     Their RESULTS still include _meta (via toMcpContent) so the host
+    //     knows to update the widget's toolOutput.
     const tools = rawTools.map(tool => {
         const isRenderTool = MODEL_RENDER_TOOLS.has(tool.name);
         if (isRenderTool) {
             return {
                 ...tool,
-                _meta: {
-                    ui: {
-                        resourceUri: getWidgetResourceUri(),
-                    },
+                _meta: getToolMeta(),
+                annotations: {
+                    destructiveHint: false,
+                    openWorldHint: false,
+                    readOnlyHint: true,
                 },
             };
         }
-        // Widget-interactive / data-only tools — no UI metadata
-        return { ...tool };
+        // Widget-interactive / data-only tools — no _meta.ui in definition
+        // but their results include _meta via toMcpContent
+        return {
+            ...tool,
+            annotations: {
+                destructiveHint: false,
+                openWorldHint: false,
+                readOnlyHint: true,
+            },
+        };
     });
     return { tools };
 });
@@ -538,17 +596,13 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => {
                 uri: WIDGET_RESOURCE_URI_BASE,
                 mimeType: APP_WIDGET_MIME_TYPE,
                 description: 'H&R Block TaxPilot interactive UI widget — renders intake forms, document checklists, tax pro cards, and appointment summaries.',
-                _meta: {
-                    ui: {
-                        resourceUri: getWidgetResourceUri(),
-                    },
-                },
+                _meta: getToolMeta(),
             }],
     };
 });
 // Handle resource reading — always return the interactive JS widget template.
-// ChatGPT delivers structuredContent via the MCP Apps bridge (postMessage)
-// so the widget re-renders from the latest tool output automatically.
+// The host delivers structuredContent as window.openai.toolOutput and
+// fires openai:set_globals so the widget re-renders automatically.
 server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     const { uri } = request.params;
     // Accept base URI or any versioned variant (?v=N)
@@ -559,11 +613,7 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
                     uri,
                     mimeType: APP_WIDGET_MIME_TYPE,
                     text: html,
-                    _meta: {
-                        ui: {
-                            resourceUri: getWidgetResourceUri(),
-                        },
-                    },
+                    _meta: getToolMeta(),
                 }],
         };
     }
