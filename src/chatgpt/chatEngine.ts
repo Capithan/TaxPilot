@@ -273,9 +273,24 @@ function executeTool(name: string, args: Record<string, unknown>): ToolResult {
       }
       case 'process_intake_response': {
         const step = args.step as string | undefined;
-        const formData = args.formData as Record<string, string> | undefined;
+        let formData = args.formData as Record<string, string> | undefined;
         const selection = args.selection as string | undefined;
         const selections = args.selections as string[] | undefined;
+
+        // Widget submissions send form fields at the top level (e.g. firstName, lastName)
+        // rather than nested under formData. If formData wasn't provided, extract it.
+        if (!formData && step && args && typeof args === 'object') {
+          const knownKeys = new Set(['sessionId', 'step', 'formData', 'selection', 'selections', 'answer']);
+          const extracted: Record<string, string> = {};
+          for (const [key, value] of Object.entries(args as Record<string, unknown>)) {
+            if (knownKeys.has(key)) continue;
+            if (value === undefined || value === null) continue;
+            extracted[key] = String(value);
+          }
+          if (Object.keys(extracted).length > 0) {
+            formData = extracted;
+          }
+        }
 
         let result;
         if (step && (formData || selection || selections)) {
@@ -283,7 +298,8 @@ function executeTool(name: string, args: Record<string, unknown>): ToolResult {
             args.sessionId as string, step, formData, selection, selections,
           );
         } else {
-          result = processIntakeResponse(args.sessionId as string, args.answer as string);
+          // Defensive: args.answer can be missing if the caller is using structured args
+          result = processIntakeResponse(args.sessionId as string, (args.answer as string) ?? '');
         }
 
         // Build structured UI for the next step

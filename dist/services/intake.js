@@ -334,6 +334,7 @@ function applyStructuredData(client, step, formData, selection, selections) {
     db.updateClient(client.id, client);
 }
 export function processIntakeResponse(sessionId, answer) {
+    const safeAnswer = typeof answer === 'string' ? answer : String(answer ?? '');
     const session = db.getSession(sessionId);
     if (!session) {
         return { success: false, message: 'Session not found' };
@@ -346,16 +347,16 @@ export function processIntakeResponse(sessionId, answer) {
     const response = {
         step: session.currentStep,
         question: getCurrentQuestion(session),
-        answer,
+        answer: safeAnswer,
         timestamp: new Date(),
     };
     session.responses.push(response);
     // Process the response and update client profile
-    updateClientFromResponse(client, session.currentStep, answer);
+    updateClientFromResponse(client, session.currentStep, safeAnswer);
     // Check if current step is complete
     const stepQuestions = INTAKE_QUESTIONS[session.currentStep];
     const stepResponses = session.responses.filter((r) => r.step === session.currentStep);
-    if (stepResponses.length >= stepQuestions.length || isStepComplete(session.currentStep, answer)) {
+    if (stepResponses.length >= stepQuestions.length || isStepComplete(session.currentStep, safeAnswer)) {
         // Move to next step
         session.completedSteps.push(session.currentStep);
         const currentIndex = INTAKE_STEPS.indexOf(session.currentStep);

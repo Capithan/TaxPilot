@@ -760,21 +760,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const selection = args?.selection as string | undefined;
         const selections = args?.selections as string[] | undefined;
 
-        // The widget merges form field values as top-level args (not nested
-        // under formData). Detect this case and reconstruct the formData map
-        // so the structured handler receives it correctly.
-        if (step && !formData && !selection && !selections) {
-          const knownKeys = new Set(['sessionId', 'step', 'answer', 'formData', 'selection', 'selections']);
-          const extra: Record<string, string> = {};
-          let hasExtra = false;
-          for (const [k, v] of Object.entries(args || {})) {
-            if (!knownKeys.has(k) && v !== undefined && v !== null) {
-              extra[k] = String(v);
-              hasExtra = true;
-            }
+        // Widget submissions may send form fields at the top level (e.g. firstName, lastName)
+        // rather than nested under formData. If formData wasn't provided, extract it.
+        if (!formData && step && args && typeof args === 'object') {
+          const knownKeys = new Set(['sessionId', 'step', 'formData', 'selection', 'selections', 'answer']);
+          const extracted: Record<string, string> = {};
+          for (const [key, value] of Object.entries(args as Record<string, unknown>)) {
+            if (knownKeys.has(key)) continue;
+            if (value === undefined || value === null) continue;
+            extracted[key] = String(value);
           }
-          if (hasExtra) {
-            formData = extra;
+          if (Object.keys(extracted).length > 0) {
+            formData = extracted;
           }
         }
 
@@ -788,7 +785,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         } else {
           result = processIntakeResponse(
             sid,
-            args?.answer as string,
+            ((args?.answer as string) ?? ''),
           );
         }
 

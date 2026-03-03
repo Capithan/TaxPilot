@@ -497,9 +497,23 @@ function handleToolCall(name, args) {
             case 'process_intake_response': {
                 const sid = args.sessionId;
                 const step = args.step;
-                const formData = args.formData;
+                let formData = args.formData;
                 const selection = args.selection;
                 const selections = args.selections;
+                // Widget sends form values at top level, not nested in formData
+                // Extract them if formData wasn't explicitly provided
+                if (!formData && step && args) {
+                    const knownKeys = ['sessionId', 'step', 'formData', 'selection', 'selections', 'answer'];
+                    const extractedData = {};
+                    for (const [key, value] of Object.entries(args)) {
+                        if (!knownKeys.includes(key) && value !== undefined && value !== null) {
+                            extractedData[key] = String(value);
+                        }
+                    }
+                    if (Object.keys(extractedData).length > 0) {
+                        formData = extractedData;
+                    }
+                }
                 let result;
                 if (step && (formData || selection || selections)) {
                     result = processStructuredIntakeResponse(sid, step, formData, selection, selections);

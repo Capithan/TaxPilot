@@ -15,81 +15,28 @@ import { formatComplexityScore, formatRoutingResult, formatTaxProRecommendations
 import { formatRemindersCreated, formatRemindersList, formatReminderSent, } from './ui/formatters/reminders.js';
 import { formatFlowStatus, formatFlowAdvanced, formatSummaryConfirmed, formatSchedulingPreferences, formatTaxProSelected, formatFlowProgress, } from './ui/formatters/flow.js';
 import { formatWelcomeScreen } from './ui/formatters/welcome.js';
+import { toReadableText } from './ui/toReadableText.js';
 import { getAppWidgetHtml, APP_WIDGET_MIME_TYPE } from './ui/appWidgetHtml.js';
 /** MCP Apps Widget resource URI */
-const WIDGET_RESOURCE_URI_ROOT = 'ui://taxpilot/widget.html';
-const WIDGET_BUILD_ID = encodeURIComponent(process.env.TAXPILOT_WIDGET_BUILD_ID
-    || process.env.WEBSITE_INSTANCE_ID
-    || Date.now().toString(36));
-const WIDGET_RESOURCE_URI_BASE = `${WIDGET_RESOURCE_URI_ROOT}?build=${WIDGET_BUILD_ID}`;
+const WIDGET_RESOURCE_URI_BASE = 'ui://taxpilot/widget.html';
 /** Store the latest tool result so the widget can render without the postMessage bridge */
 let latestToolResult = formatWelcomeScreen();
-/** Keep resource URI stable for ChatGPT tree reconciliation. */
+let toolResultVersion = latestToolResult ? 1 : 0;
+/** Get the current widget resource URI (versioned so ChatGPT fetches fresh HTML) */
 function getWidgetResourceUri() {
-    return WIDGET_RESOURCE_URI_BASE;
+    return toolResultVersion > 0
+        ? `${WIDGET_RESOURCE_URI_BASE}?v=${toolResultVersion}`
+        : WIDGET_RESOURCE_URI_BASE;
 }
-/**
- * CSP domains for the MCP Apps sandbox.
- * Per sebderhy/mcp-app-template _base.py get_csp_domains().
- * Our widget is fully self-contained (inline JS/CSS) so we use
- * the deployment URL as the only resource/connect domain.
- */
-function getCspDomains() {
-    const origin = process.env.WEBSITE_HOSTNAME
-        ? `https://${process.env.WEBSITE_HOSTNAME}`
-        : process.env.BASE_URL || '';
-    const resourceDomains = origin ? [origin] : [];
-    const connectDomains = origin ? [origin] : [];
-    return { resourceDomains, connectDomains };
-}
-/**
- * Return MCP Apps metadata for tool definitions.
- * Per sebderhy/mcp-app-template _base.py get_tool_meta().
- * The key field is ui.resourceUri which links the tool to its UI resource.
- */
-function getToolMeta() {
-    return {
-        ui: {
-            resourceUri: getWidgetResourceUri(),
-            csp: getCspDomains(),
-        },
-    };
-}
-/**
- * Return metadata for tool invocation results.
- * Per sebderhy/mcp-app-template _base.py get_invocation_meta().
- * This tells the host which widget to update with the new structuredContent.
- */
-function getInvocationMeta() {
-    return {
-        ui: {
-            resourceUri: getWidgetResourceUri(),
-            csp: getCspDomains(),
-        },
-    };
-}
-/**
- * Wrap a UIResponse into the MCP CallToolResult format.
- *
- * Per the sebderhy/mcp-app-template reference:
- *   - content[0].text is a human-readable summary (shown in chat text)
- *   - structuredContent carries the actual data (host delivers as toolOutput)
- *   - _meta.ui.resourceUri tells the host which widget to update
- *
- * When the widget calls window.openai.callTool, the host:
- *   1. Routes the call to the MCP server
- *   2. Gets back this CallToolResult
- *   3. Sees _meta.ui.resourceUri and updates window.openai.toolOutput
- *   4. Fires openai:set_globals so the widget re-renders
- */
+/** Wrap a UIResponse into the MCP content block format with structuredContent for Apps SDK. */
 function toMcpContent(uiResp) {
     const sc = uiResp;
     latestToolResult = sc;
-    const screen = typeof sc.screen === 'string' ? sc.screen : 'update';
+    toolResultVersion++;
+    const readable = toReadableText(sc);
     return {
-        content: [{ type: 'text', text: `TaxPilot: ${screen}` }],
+        content: [{ type: 'text', text: readable }],
         structuredContent: sc,
-        _meta: getInvocationMeta(),
     };
 }
 // Create the MCP server
@@ -525,64 +472,22 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
         },
     ];
-    // Inject MCP Apps UI metadata into tools.
-    //
-    // Following the OpenAI "decoupled pattern" recommendation:
-    //   - Model-facing / render tools get openai/outputTemplate so ChatGPT
-    //     renders the widget when the *model* triggers them.
-    //   - Widget-interactive tools (called from inside the widget via
-    //     window.openai.callTool) do NOT get outputTemplate. The widget
-    //     handles re-rendering internally from the structuredContent.
-    //     Attaching outputTemplate to these tools causes ChatGPT's tree
-    //     reconciler to also try to update the widget externally, producing
-    //     the "Cannot moveNode" error.
-    //
-    // See: https://developers.openai.com/apps-sdk/build/chatgpt-ui/#decoupled-pattern
-    const MODEL_RENDER_TOOLS = new Set([
-        'render_welcome_ui',
-        'start_intake',
-        'get_client_summary',
-        'generate_document_checklist',
-        'get_document_checklist',
-        'get_pending_documents',
-        'get_intake_progress',
-        'list_tax_professionals',
-        'calculate_complexity',
-        'route_to_tax_pro',
-        'get_tax_pro_recommendations',
-        'create_appointment',
-        'get_appointment_estimate',
-        'get_conversation_flow',
-        'get_flow_progress',
-    ]);
-    // Following the sebderhy/mcp-app-template pattern:
-    //   - Model-render tools: _meta with ui.resourceUri + csp (host renders widget)
-    //   - Widget-interactive tools: registered but NO _meta.ui
-    //     They're called via window.openai.callTool from within the widget.
-    //     Their RESULTS still include _meta (via toMcpContent) so the host
-    //     knows to update the widget's toolOutput.
+    // Inject MCP Apps UI metadata into all tools (versioned URI for fresh HTML)
+    // All tools include openai/outputTemplate so ChatGPT always renders the widget
+    // with the latest structuredContent after each tool call.
     const tools = rawTools.map(tool => {
-        const isRenderTool = MODEL_RENDER_TOOLS.has(tool.name);
-        if (isRenderTool) {
-            return {
-                ...tool,
-                _meta: getToolMeta(),
-                annotations: {
-                    destructiveHint: false,
-                    openWorldHint: false,
-                    readOnlyHint: true,
-                },
-            };
-        }
-        // Widget-interactive / data-only tools — no _meta.ui in definition
-        // but their results include _meta via toMcpContent
+        const isRenderTool = tool.name === 'render_welcome_ui';
+        const meta = {
+            ui: { resourceUri: getWidgetResourceUri() },
+            'ui/resourceUri': getWidgetResourceUri(),
+            'openai/outputTemplate': getWidgetResourceUri(),
+            'openai/widgetAccessible': true,
+            'openai/toolInvocation/invoking': isRenderTool ? 'Rendering TaxPilot UI…' : 'Working…',
+            'openai/toolInvocation/invoked': isRenderTool ? 'Rendered TaxPilot UI.' : 'Done.',
+        };
         return {
             ...tool,
-            annotations: {
-                destructiveHint: false,
-                openWorldHint: false,
-                readOnlyHint: true,
-            },
+            _meta: meta,
         };
     });
     return { tools };
@@ -596,24 +501,33 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => {
                 uri: WIDGET_RESOURCE_URI_BASE,
                 mimeType: APP_WIDGET_MIME_TYPE,
                 description: 'H&R Block TaxPilot interactive UI widget — renders intake forms, document checklists, tax pro cards, and appointment summaries.',
-                _meta: getToolMeta(),
+                _meta: {
+                    'openai/outputTemplate': WIDGET_RESOURCE_URI_BASE,
+                    ui: { prefersBorder: true },
+                },
             }],
     };
 });
 // Handle resource reading — always return the interactive JS widget template.
-// The host delivers structuredContent as window.openai.toolOutput and
-// fires openai:set_globals so the widget re-renders automatically.
+// ChatGPT delivers structuredContent via the MCP Apps bridge (postMessage)
+// so the widget re-renders from the latest tool output automatically.
 server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     const { uri } = request.params;
     // Accept base URI or any versioned variant (?v=N)
-    if (uri.startsWith(WIDGET_RESOURCE_URI_ROOT)) {
+    if (uri.startsWith(WIDGET_RESOURCE_URI_BASE)) {
         const html = getAppWidgetHtml();
         return {
             contents: [{
                     uri,
                     mimeType: APP_WIDGET_MIME_TYPE,
                     text: html,
-                    _meta: getToolMeta(),
+                    _meta: {
+                        'openai/outputTemplate': WIDGET_RESOURCE_URI_BASE,
+                        'openai/toolInvocation/invoking': 'Rendering TaxPilot…',
+                        'openai/toolInvocation/invoked': 'TaxPilot ready',
+                        'openai/widgetAccessible': true,
+                        ui: { prefersBorder: true },
+                    },
                 }],
         };
     }
@@ -641,21 +555,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 let formData = args?.formData;
                 const selection = args?.selection;
                 const selections = args?.selections;
-                // The widget merges form field values as top-level args (not nested
-                // under formData). Detect this case and reconstruct the formData map
-                // so the structured handler receives it correctly.
-                if (step && !formData && !selection && !selections) {
-                    const knownKeys = new Set(['sessionId', 'step', 'answer', 'formData', 'selection', 'selections']);
-                    const extra = {};
-                    let hasExtra = false;
-                    for (const [k, v] of Object.entries(args || {})) {
-                        if (!knownKeys.has(k) && v !== undefined && v !== null) {
-                            extra[k] = String(v);
-                            hasExtra = true;
-                        }
+                // Widget submissions may send form fields at the top level (e.g. firstName, lastName)
+                // rather than nested under formData. If formData wasn't provided, extract it.
+                if (!formData && step && args && typeof args === 'object') {
+                    const knownKeys = new Set(['sessionId', 'step', 'formData', 'selection', 'selections', 'answer']);
+                    const extracted = {};
+                    for (const [key, value] of Object.entries(args)) {
+                        if (knownKeys.has(key))
+                            continue;
+                        if (value === undefined || value === null)
+                            continue;
+                        extracted[key] = String(value);
                     }
-                    if (hasExtra) {
-                        formData = extra;
+                    if (Object.keys(extracted).length > 0) {
+                        formData = extracted;
                     }
                 }
                 let result;
@@ -664,33 +577,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     result = processStructuredIntakeResponse(sid, step, formData, selection, selections);
                 }
                 else {
-                    result = processIntakeResponse(sid, args?.answer);
-                }
-                // Surface session/client errors instead of silently re-rendering
-                // the first intake step, which looks like "submit does nothing".
-                if (!result.success) {
-                    const errUI = {
-                        id: `taxpilot-intake-error`,
-                        screen: 'error',
-                        components: [
-                            {
-                                type: 'banner',
-                                text: `⚠️ ${result.message ?? 'Unable to continue this intake session. Please start a new intake.'}`,
-                                variant: 'error',
-                                icon: '⚠️',
-                            },
-                            {
-                                type: 'button',
-                                label: '🔄 Start New Intake',
-                                variant: 'primary',
-                                action: { type: 'tool_call', tool: 'start_intake', parameters: {} },
-                            },
-                        ],
-                        stateUpdates: { screen: 'error' },
-                        data: { sessionId: sid, error: result.message ?? 'intake_processing_failed' },
-                        _meta: { toolName: 'process_intake_response', timestamp: new Date().toISOString() },
-                    };
-                    return toMcpContent(errUI);
+                    result = processIntakeResponse(sid, (args?.answer ?? ''));
                 }
                 // Check if intake is complete and advance flow
                 if (result.intakeCompleted && result.client) {

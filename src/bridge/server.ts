@@ -583,9 +583,24 @@ function handleToolCall(name: string, args: Record<string, unknown>): { content:
       case 'process_intake_response': {
         const sid = args.sessionId as string;
         const step = args.step as string | undefined;
-        const formData = args.formData as Record<string, string> | undefined;
+        let formData = args.formData as Record<string, string> | undefined;
         const selection = args.selection as string | undefined;
         const selections = args.selections as string[] | undefined;
+
+        // Widget sends form values at top level, not nested in formData
+        // Extract them if formData wasn't explicitly provided
+        if (!formData && step && args) {
+          const knownKeys = ['sessionId', 'step', 'formData', 'selection', 'selections', 'answer'];
+          const extractedData: Record<string, string> = {};
+          for (const [key, value] of Object.entries(args)) {
+            if (!knownKeys.includes(key) && value !== undefined && value !== null) {
+              extractedData[key] = String(value);
+            }
+          }
+          if (Object.keys(extractedData).length > 0) {
+            formData = extractedData;
+          }
+        }
 
         let result;
         if (step && (formData || selection || selections)) {

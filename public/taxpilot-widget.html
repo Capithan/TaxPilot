@@ -379,59 +379,134 @@ body {
 
 <script>
 /**
- * TaxPilot MCP Apps Widget
+ * MCP Apps Widget Bridge + Renderer
  *
- * Follows sebderhy/mcp-app-template EXACTLY:
- *   - window.openai.toolOutput → initial render (structuredContent from model tool call)
- *   - openai:set_globals event → re-render when host updates toolOutput
- *   - window.openai.callTool(name, args) → triggers tool, host updates toolOutput
- *   - callTool returns { result: string } but we DON'T render from it
- *   - The host sees _meta.ui.resourceUri in the tool result and updates toolOutput
- *
- * Reference: https://github.com/sebderhy/mcp-app-template
- *   - src/use-widget-props.ts   → reads window.openai.toolOutput
- *   - src/use-host-global.ts    → subscribes to openai:set_globals
- *   - src/boilerplate/App.tsx   → uses window.openai.callTool (just logs result)
- *   - server/widgets/_base.py   → get_invocation_meta returns ui.resourceUri+csp
+ * This widget communicates with ChatGPT via the MCP Apps postMessage protocol.
+ * Flow:
+ *   1. Widget loads → sends ui/initialize to host
+ *   2. Host responds with capabilities + context
+ *   3. On tool calls: host sends ui/notifications/tool-input + ui/notifications/tool-result
+ *   4. Widget renders structuredContent from tool results
+ *   5. Widget can call tools back via tools/call request
  */
 
 // ═══════════════════════════════════════════════════════════════════
-// TOOL CALL API — uses window.openai.callTool (standard MCP Apps API)
+// MCP APPS BRIDGE
 // ═══════════════════════════════════════════════════════════════════
 
-/**
- * Call an MCP tool from within the widget.
- *
- * Per reference (boilerplate/App.tsx): callTool returns { result: string }
- * The widget does NOT render from this result. Instead:
- *   1. The host receives the server's CallToolResult (with _meta.ui.resourceUri)
- *   2. The host updates window.openai.toolOutput with the new structuredContent
- *   3. The host fires openai:set_globals
- *   4. Our set_globals listener re-renders from toolOutput
- *
- * We return the result for logging/debugging only.
- */
-async function callTool(name, args) {
-  console.log('[TaxPilot] callTool:', name, args);
+class McpAppBridge {
+  constructor() {
+    this._requestId = 0;
+    this._pendingRequests = new Map();
+    this._handlers = new Map();
+    this._notificationHandlers = new Map();
+    this._initialized = false;
+    this._hostCapabilities = null;
 
-  if (!window.openai || typeof window.openai.callTool !== 'function') {
-    throw new Error('window.openai.callTool is not available');
+    // Listen for messages from the host (ChatGPT)
+    window.addEventListener('message', (event) => this._onMessage(event));
   }
 
-  const response = await window.openai.callTool(name, args || {});
-  console.log('[TaxPilot] callTool response:', response);
+  /** Start the bridge handshake */
+  async initialize() {
+    try {
+      // Use a short timeout (2s) for initialization - if there's no host, fail fast
+      const result = await this._sendRequest('ui/initialize', {
+        protocolVersion: '2026-01-26',
+        capabilities: {
+          tools: true,
+          notifications: true,
+        },
+      }, 2000);
 
-  // The host should update toolOutput automatically via set_globals.
-  // Return the response for fallback rendering if needed.
-  return response;
-}
+      this._hostCapabilities = result;
+      this._initialized = true;
 
-/**
- * Read the current toolOutput from the host.
- * Per use-widget-props.ts: reads window.openai.toolOutput directly.
- */
-function getToolOutput() {
-  return (window.openai && window.openai.toolOutput) || null;
+      // Send initialized notification
+      this._sendNotification('ui/notifications/initialized', {});
+
+      return result;
+    } catch (err) {
+      console.warn('[MCP Bridge] Initialize failed — running in standalone mode:', err);
+      this._initialized = false;
+      return null;
+    }
+  }
+
+  /** Register a handler for incoming notifications */
+  onNotification(method, handler) {
+    if (!this._notificationHandlers.has(method)) {
+      this._notificationHandlers.set(method, []);
+    }
+    this._notificationHandlers.get(method).push(handler);
+  }
+
+  /** Call a tool on the MCP server via the host */
+  async callTool(name, args = {}) {
+    return this._sendRequest('tools/call', { name, arguments: args });
+  }
+
+  /** Send a size-changed notification */
+  sendSizeChanged(width, height) {
+    this._sendNotification('ui/notifications/size-changed', { width, height });
+  }
+
+  // ─── Internal ──────────────────────────────────────────────────
+
+  _sendRequest(method, params, timeout = 30000) {
+    return new Promise((resolve, reject) => {
+      const id = ++this._requestId;
+      this._pendingRequests.set(id, { resolve, reject });
+
+      const message = { jsonrpc: '2.0', id, method, params };
+      window.parent.postMessage(message, '*');
+
+      // Timeout - uses provided timeout or default 30s
+      setTimeout(() => {
+        if (this._pendingRequests.has(id)) {
+          this._pendingRequests.delete(id);
+          reject(new Error(`Request ${method} timed out`));
+        }
+      }, timeout);
+    });
+  }
+
+  _sendNotification(method, params) {
+    const message = { jsonrpc: '2.0', method, params };
+    window.parent.postMessage(message, '*');
+  }
+
+  _onMessage(event) {
+    const data = event.data;
+    if (!data || typeof data !== 'object' || data.jsonrpc !== '2.0') return;
+
+    // Ignore messages that have `method` - those are requests, not responses
+    // This prevents standalone mode from treating our own outgoing messages as responses
+    if (data.method) {
+      // It's either an outgoing request (echoed back in standalone) or a notification
+      // Only handle notifications (no id)
+      if (data.id === undefined || data.id === null) {
+        const handlers = this._notificationHandlers.get(data.method) || [];
+        handlers.forEach(h => {
+          try { h(data.params || {}); } catch (e) { console.error('[MCP Bridge] Handler error:', e); }
+        });
+      }
+      return;
+    }
+
+    // Response to a request we sent (has id, no method)
+    if (data.id !== undefined && data.id !== null) {
+      const pending = this._pendingRequests.get(data.id);
+      if (pending) {
+        this._pendingRequests.delete(data.id);
+        if (data.error) {
+          pending.reject(new Error(data.error.message || 'Unknown error'));
+        } else {
+          pending.resolve(data.result);
+        }
+      }
+    }
+  }
 }
 
 
@@ -439,36 +514,666 @@ function getToolOutput() {
 // SESSION STATE
 // ═══════════════════════════════════════════════════════════════════
 
-const sessionState = {
-  _state: {
-    screen: 'home', sessionId: null, clientId: null,
-    intakeProgress: 0, currentIntakeStep: null,
-    taxProId: null, appointmentId: null,
-    formData: {}, selections: {},
-  },
-  get state() { return { ...this._state }; },
+class SessionStateManager {
+  constructor() {
+    this._state = {
+      screen: 'home', sessionId: null, clientId: null,
+      intakeProgress: 0, currentIntakeStep: null,
+      taxProId: null, appointmentId: null,
+      formData: {}, selections: {},
+    };
+  }
+
+  get state() { return { ...this._state }; }
+
   update(patch) {
-    if (patch && typeof patch === 'object') this._state = { ...this._state, ...patch };
-  },
+    if (!patch || typeof patch !== 'object') return;
+    this._state = { ...this._state, ...patch };
+  }
+
   setFormValue(groupId, fieldId, value) {
     if (!this._state.formData[groupId]) this._state.formData[groupId] = {};
     this._state.formData[groupId][fieldId] = value;
-  },
-  getFormValues(groupId) { return this._state.formData[groupId] || {}; },
+  }
+
+  getFormValues(groupId) { return this._state.formData[groupId] || {}; }
+
   toggleSelection(groupId, itemId) {
     if (!this._state.selections[groupId]) this._state.selections[groupId] = new Set();
     const set = this._state.selections[groupId];
     if (set.has(itemId)) set.delete(itemId); else set.add(itemId);
     return [...set];
-  },
+  }
+
   setSelection(groupId, itemId) {
     this._state.selections[groupId] = new Set([itemId]);
     return [itemId];
-  },
+  }
+
   getSelections(groupId) {
     return this._state.selections[groupId] ? [...this._state.selections[groupId]] : [];
-  },
-};
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
+// WIDGET RENDERER
+// ═══════════════════════════════════════════════════════════════════
+
+class WidgetRenderer {
+  constructor(bridge, state) {
+    this.bridge = bridge;
+    this.state = state;
+    this.root = document.getElementById('widget-root');
+    this._bindings = [];
+    this._uidCounter = 0;
+  }
+
+  /** Render a StructuredUIResponse (from structuredContent or parsed tool result) */
+  renderResponse(response) {
+    if (!response) return;
+
+    // Apply state updates
+    if (response.stateUpdates) {
+      this.state.update(response.stateUpdates);
+    }
+
+    // Attempt to find components array
+    let components = response.components;
+    if (!components && response.screen) {
+      // Some responses may have screen-level data rather than components
+      this.root.innerHTML = `<div class="tp-structured"><div class="tp-text tp-text--body">Screen: ${esc(response.screen)}</div></div>`;
+      return;
+    }
+    if (!components || !Array.isArray(components)) {
+      // Try to render raw data as an info card
+      this._renderRawData(response);
+      return;
+    }
+
+    this._bindings = [];
+    const parts = components.map(c => this._renderComponent(c));
+    this.root.innerHTML = `<div class="tp-structured" data-screen="${response.screen || ''}">${parts.join('')}</div>`;
+
+    // Attach event handlers
+    this._bindings.forEach(fn => fn(this.root));
+    this._bindings = [];
+
+    // Notify host of size change
+    this._reportSize();
+  }
+
+  /** Render the UIResponse format (text content from tool result) */
+  renderUIResponse(uiResp) {
+    if (!uiResp) return;
+
+    // Convert UIResponse to a simple display
+    const parts = [];
+
+    if (uiResp._ui) {
+      const ui = uiResp._ui;
+      if (ui.title) parts.push(`<div class="tp-text tp-text--heading">${esc(ui.title)}</div>`);
+      if (ui.subtitle) parts.push(`<div class="tp-text tp-text--subheading">${esc(ui.subtitle)}</div>`);
+      if (ui.badge) parts.push(`<span class="tp-badge tp-badge--brand">${esc(ui.badge)}</span>`);
+      if (ui.highlight) parts.push(`<div class="tp-card-highlight">${esc(ui.highlight)}</div>`);
+    }
+
+    // Data fields
+    if (uiResp.data || uiResp) {
+      const data = uiResp.data || uiResp;
+      const fields = [];
+      for (const [key, val] of Object.entries(data)) {
+        if (key.startsWith('_') || key === 'data') continue;
+        if (typeof val === 'string' || typeof val === 'number') {
+          fields.push(`<div class="tp-cardfield"><span class="tp-cardfield-label">${esc(key)}</span><span class="tp-cardfield-value">${esc(String(val))}</span></div>`);
+        }
+      }
+      if (fields.length) {
+        parts.push(`<div class="tp-card"><div class="tp-card-fields">${fields.join('')}</div></div>`);
+      }
+    }
+
+    if (parts.length === 0) {
+      parts.push(`<div class="tp-text tp-text--body">Response received</div>`);
+    }
+
+    this.root.innerHTML = `<div class="tp-structured">${parts.join('')}</div>`;
+    this._reportSize();
+  }
+
+  _renderRawData(data) {
+    const fields = [];
+    for (const [key, val] of Object.entries(data)) {
+      if (key.startsWith('_')) continue;
+      if (typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean') {
+        fields.push(`<div class="tp-cardfield"><span class="tp-cardfield-label">${esc(key)}</span><span class="tp-cardfield-value">${esc(String(val))}</span></div>`);
+      }
+    }
+    this.root.innerHTML = fields.length
+      ? `<div class="tp-structured"><div class="tp-card"><div class="tp-card-fields">${fields.join('')}</div></div></div>`
+      : `<div class="tp-structured"><div class="tp-text tp-text--body">Data received</div></div>`;
+    this._reportSize();
+  }
+
+  _reportSize() {
+    requestAnimationFrame(() => {
+      const rect = this.root.getBoundingClientRect();
+      this.bridge.sendSizeChanged(Math.ceil(rect.width), Math.ceil(rect.height));
+    });
+  }
+
+  // ─── Component dispatcher ──────────────────────────────────────
+  _renderComponent(c) {
+    if (!c) return '';
+    // Accept MCP Apps SDK PascalCase (c.component) OR formatter snake_case (c.type)
+    const key = c.component || c.type || '';
+    switch (key) {
+      case 'Button':      case 'button':                           return this._renderButton(c);
+      case 'FormField':   case 'form_field':                       return this._renderFormField(c);
+      case 'FormGroup':   case 'form_group':                       return this._renderFormGroup(c);
+      case 'MultiSelectCard':    case 'multi_select':              return this._renderMultiSelect(c);
+      case 'SelectionCard':      case 'selection_card':            return this._renderSelectionCard(c);
+      case 'StatusBadge':        case 'status_badge':              return this._renderStatusBadge(c);
+      case 'StepProgress':       case 'step_progress':             return this._renderStepProgress(c);
+      case 'ProgressBar':        case 'progress_bar':              return this._renderProgressBar(c);
+      case 'InfoCard':           case 'info_card':                 return this._renderInfoCard(c);
+      case 'AppointmentSummaryCard': case 'appointment_summary':   return this._renderAppointmentSummary(c);
+      case 'TaxProCard':         case 'tax_pro_card':              return this._renderTaxProCard(c);
+      case 'Checklist':          case 'checklist':                 return this._renderChecklist(c);
+      case 'Banner':             case 'banner':                    return this._renderBanner(c);
+      case 'Divider':            case 'divider':                   return this._renderDivider(c);
+      case 'TextBlock':          case 'text_block':                return this._renderTextBlock(c);
+      case 'Carousel':           case 'carousel':                  return this._renderCarousel(c);
+      default: return `<!-- unknown: ${key} -->`;
+    }
+  }
+
+  // ─── Button ────────────────────────────────────────────────────
+  _renderButton(c) {
+    const id = this._uid('btn');
+    const variantClass = {
+      danger: 'tp-btn--danger', secondary: 'tp-btn--secondary',
+      ghost: 'tp-btn--ghost', success: 'tp-btn--primary',
+    }[c.variant] || 'tp-btn--primary';
+    const sizeClass = c.size === 'sm' ? 'tp-btn--sm' : c.size === 'lg' ? 'tp-btn--lg' : '';
+    const disabled = c.disabled ? 'disabled' : '';
+    const icon = c.icon ? `<span class="tp-btn-icon">${c.icon}</span>` : '';
+
+    this._bindings.push(el => {
+      const btn = el.querySelector(`#${id}`);
+      if (btn) btn.addEventListener('click', () => this._handleAction(c.action));
+    });
+
+    return `<button id="${id}" class="tp-btn ${variantClass} ${sizeClass}" ${disabled}>${icon}<span>${esc(c.label)}</span></button>`;
+  }
+
+  // ─── Form Field ────────────────────────────────────────────────
+  _renderFormField(c, groupId) {
+    const id = this._uid('field');
+    const gid = groupId || '__global';
+    const required = c.required ? 'required' : '';
+    const requiredMark = c.required ? '<span class="tp-required">*</span>' : '';
+    let input = '';
+
+    // Switch on c.fieldType (formatter) falling back to c.type (legacy)
+    const fieldType = c.fieldType || c.type;
+    switch (fieldType) {
+      case 'select':
+        input = `<select id="${id}" data-field-id="${esc(c.id)}" class="tp-input tp-select" ${required}>
+          <option value="" disabled selected>${esc(c.placeholder || 'Select...')}</option>
+          ${(c.options || []).map(o => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('')}
+        </select>`;
+        break;
+      case 'textarea':
+        input = `<textarea id="${id}" data-field-id="${esc(c.id)}" class="tp-input tp-textarea" placeholder="${esc(c.placeholder || '')}" rows="3" ${required}></textarea>`;
+        break;
+      case 'date': {
+        // 3-select date picker — works on every mobile browser
+        const monId = this._uid('dmon');
+        const dayId = this._uid('dday');
+        const yrId  = this._uid('dyr');
+        const monthNames = ['January','February','March','April','May','June',
+                            'July','August','September','October','November','December'];
+        const monthOpts = monthNames.map((m, i) =>
+          `<option value="${String(i + 1).padStart(2, '0')}">${m}</option>`).join('');
+        const dayOpts = Array.from({ length: 31 }, (_, i) =>
+          `<option value="${String(i + 1).padStart(2, '0')}">${i + 1}</option>`).join('');
+        const curYear = new Date().getFullYear();
+        const yearOpts = Array.from({ length: 101 }, (_, i) => curYear - 16 - i)
+          .map(y => `<option value="${y}">${y}</option>`).join('');
+        input =
+          `<div class="tp-date-selects">` +
+          `<input type="hidden" id="${id}" data-field-id="${esc(c.id)}" value="">` +
+          `<select id="${monId}" class="tp-input tp-select tp-date-sel" aria-label="Month">` +
+            `<option value="" disabled selected>Month</option>${monthOpts}` +
+          `</select>` +
+          `<select id="${dayId}" class="tp-input tp-select tp-date-sel" aria-label="Day">` +
+            `<option value="" disabled selected>Day</option>${dayOpts}` +
+          `</select>` +
+          `<select id="${yrId}" class="tp-input tp-select tp-date-sel" aria-label="Year">` +
+            `<option value="" disabled selected>Year</option>${yearOpts}` +
+          `</select>` +
+          `</div>`;
+        this._bindings.push(el => {
+          const hidden = el.querySelector(`#${id}`);
+          const mon    = el.querySelector(`#${monId}`);
+          const day    = el.querySelector(`#${dayId}`);
+          const yr     = el.querySelector(`#${yrId}`);
+          const combine = () => {
+            const m = mon ? mon.value : '', d = day ? day.value : '', y = yr ? yr.value : '';
+            const val = (m && d && y) ? `${y}-${m}-${d}` : '';
+            if (hidden) hidden.value = val;
+            this.state.setFormValue(gid, c.id, val);
+          };
+          [mon, day, yr].forEach(sel => {
+            if (sel) { sel.addEventListener('change', combine); sel.addEventListener('input', combine); }
+          });
+        });
+        break;
+      }
+      case 'email':
+        input = `<input type="email" id="${id}" data-field-id="${esc(c.id)}" class="tp-input" placeholder="${esc(c.placeholder || '')}" ${required}>`;
+        break;
+      case 'phone':
+        input = `<input type="tel" id="${id}" data-field-id="${esc(c.id)}" class="tp-input" placeholder="${esc(c.placeholder || '')}" ${required}>`;
+        break;
+      case 'number':
+        input = `<input type="number" id="${id}" data-field-id="${esc(c.id)}" class="tp-input" placeholder="${esc(c.placeholder || '')}" ${required}>`;
+        break;
+      default:
+        input = `<input type="text" id="${id}" data-field-id="${esc(c.id)}" class="tp-input" placeholder="${esc(c.placeholder || '')}" ${required}>`;
+    }
+
+    const helpText = c.helperText ? `<div class="tp-field-help">${esc(c.helperText)}</div>` : '';
+
+    this._bindings.push(el => {
+      const inp = el.querySelector(`#${id}`);
+      if (inp) {
+        const update = () => this.state.setFormValue(gid, c.id, inp.value);
+        inp.addEventListener('input', update);
+        inp.addEventListener('change', update);
+      }
+    });
+
+    return `<div class="tp-field"><label class="tp-field-label" for="${id}">${esc(c.label)}${requiredMark}</label>${input}${helpText}</div>`;
+  }
+
+  // ─── Form Group ────────────────────────────────────────────────
+  _renderFormGroup(c) {
+    const gid = this._uid('fgroup');
+    const title = c.title ? `<div class="tp-form-title">${esc(c.title)}</div>` : '';
+    const subtitle = c.subtitle ? `<div class="tp-form-desc">${esc(c.subtitle)}</div>` : '';
+    const fields = (c.fields || []).map(f => this._renderFormField(f, gid)).join('');
+    const submitLabel = c.submitLabel || 'Submit';
+    const submitId = this._uid('fsubmit');
+
+    this._bindings.push(el => {
+      const btn = el.querySelector(`#${submitId}`);
+      if (btn) btn.addEventListener('click', () => {
+        const values = this.state.getFormValues(gid);
+
+        // Support submitAction (component types schema) OR action (intake formatter schema)
+        const submitDef = c.submitAction || c.action;
+        if (submitDef) {
+          // Disable button immediately to prevent double-submit
+          btn.disabled = true;
+          btn.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,0.4);border-top-color:#fff;border-radius:50%;animation:tpSpin 0.6s linear infinite;vertical-align:middle;margin-right:6px"></span>Sending\u2026';
+
+          const action = { ...submitDef };
+          if (action.type === 'tool_call') {
+            // Normalise: send canonical structured payload
+            // Keep existing params (sessionId, step, etc) and attach formData.
+            action.toolArgs = { ...(action.toolArgs || action.parameters || {}), formData: values };
+          } else if (action.type === 'submit_form') {
+            action.formData = values;
+          }
+          this._handleAction(action);
+        }
+      });
+    });
+
+    return `<div class="tp-form-group" data-group="${gid}">${title}${subtitle}<div class="tp-form-fields">${fields}</div><button id="${submitId}" class="tp-btn tp-btn--primary tp-form-submit">${esc(submitLabel)}</button></div>`;
+  }
+
+  // ─── Multi-Select ──────────────────────────────────────────────
+  _renderMultiSelect(c) {
+    const gid = this._uid('msel');
+    const isMulti = c.multiSelect !== false;
+    const submitId = this._uid('msubmit');
+    const title = c.title ? `<div class="tp-multisel-title">${esc(c.title)}</div>` : '';
+    const subtitle = c.subtitle ? `<div class="tp-multisel-sub">${esc(c.subtitle)}</div>` : '';
+
+    const options = (c.options || []).map(opt => {
+      const oid = this._uid('mopt');
+      const icon = opt.icon ? `<span class="tp-mopt-icon">${opt.icon}</span>` : '';
+      const desc = opt.description ? `<div class="tp-mopt-desc">${esc(opt.description)}</div>` : '';
+
+      this._bindings.push(el => {
+        const optEl = el.querySelector(`#${oid}`);
+        if (optEl) optEl.addEventListener('click', () => {
+          if (isMulti) {
+            this.state.toggleSelection(gid, opt.id);
+            optEl.classList.toggle('tp-mopt--selected');
+          } else {
+            optEl.parentElement.querySelectorAll('.tp-mopt--selected').forEach(s => s.classList.remove('tp-mopt--selected'));
+            this.state.setSelection(gid, opt.id);
+            optEl.classList.add('tp-mopt--selected');
+          }
+        });
+      });
+
+      return `<div id="${oid}" class="tp-mopt" data-value="${esc(opt.id)}">
+        <div class="tp-mopt-header">${icon}<div class="tp-mopt-text"><div class="tp-mopt-label">${esc(opt.label)}</div>${desc}</div>
+        <div class="tp-mopt-check"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div></div>
+      </div>`;
+    }).join('');
+
+    this._bindings.push(el => {
+      const btn = el.querySelector(`#${submitId}`);
+      if (btn) btn.addEventListener('click', () => {
+        const selected = this.state.getSelections(gid);
+        if (c.minSelect && selected.length < c.minSelect) return;
+
+        // Support submitAction (component types schema) OR action (intake formatter schema)
+        const submitDef = c.submitAction || c.action;
+        if (submitDef) {
+          // Disable button immediately
+          btn.disabled = true;
+          btn.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,0.4);border-top-color:#fff;border-radius:50%;animation:tpSpin 0.6s linear infinite;vertical-align:middle;margin-right:6px"></span>Sending\u2026';
+
+          const action = { ...submitDef };
+          if (action.type === 'tool_call') {
+            // Normalise: toolArgs covers both schemas; merge selections
+            action.toolArgs = { ...(action.toolArgs || action.parameters || {}), selections: selected };
+          }
+          this._handleAction(action);
+        }
+      });
+    });
+
+    return `<div class="tp-multisel" data-group="${gid}">${title}${subtitle}<div class="tp-multisel-options">${options}</div><button id="${submitId}" class="tp-btn tp-btn--primary">${esc(c.submitLabel || 'Continue')}</button></div>`;
+  }
+
+  // ─── Selection Card ────────────────────────────────────────────
+  _renderSelectionCard(c) {
+    const title = c.title ? `<div class="tp-sel-title">${esc(c.title)}</div>` : '';
+    const options = (c.options || []).map(opt => {
+      const oid = this._uid('sopt');
+      const icon = opt.icon ? `<span class="tp-sopt-icon">${opt.icon}</span>` : '';
+      const badge = opt.badge ? `<span class="tp-sopt-badge">${esc(opt.badge)}</span>` : '';
+      const desc = opt.description ? `<div class="tp-sopt-desc">${esc(opt.description)}</div>` : '';
+
+      this._bindings.push(el => {
+        const optEl = el.querySelector(`#${oid}`);
+        if (optEl) optEl.addEventListener('click', () => {
+          optEl.closest('.tp-sel-options').querySelectorAll('.tp-sopt--selected').forEach(s => s.classList.remove('tp-sopt--selected'));
+          optEl.classList.add('tp-sopt--selected');
+          if (c.action) {
+            const action = { ...c.action };
+            if (action.type === 'tool_call') {
+              action.toolArgs = { ...(action.toolArgs || {}), selection: opt.id };
+            } else if (action.type === 'send_message') {
+              action.message = opt.label;
+            }
+            this._handleAction(action);
+          }
+        });
+      });
+
+      return `<div id="${oid}" class="tp-sopt" data-value="${esc(opt.id)}">${icon}<div class="tp-sopt-text"><div class="tp-sopt-label">${esc(opt.label)}${badge}</div>${desc}</div></div>`;
+    }).join('');
+
+    return `<div class="tp-sel">${title}<div class="tp-sel-options">${options}</div></div>`;
+  }
+
+  // ─── Simple components ─────────────────────────────────────────
+  _renderStatusBadge(c) {
+    const icon = c.icon ? `<span class="tp-badge-icon">${c.icon}</span>` : '';
+    return `<span class="tp-badge tp-badge--${c.variant || 'info'}">${icon}${esc(c.text)}</span>`;
+  }
+
+  _renderStepProgress(c) {
+    const steps = (c.steps || []).map((s, i) => {
+      const cls = s.status === 'done' ? 'tp-step--done' : s.status === 'active' ? 'tp-step--active' : 'tp-step--upcoming';
+      const icon = s.status === 'done' ? (s.icon || '✓') : String(i + 1);
+      const line = i < (c.steps || []).length - 1
+        ? `<div class="tp-step-line ${s.status === 'done' ? 'tp-step-line--done' : ''}"></div>` : '';
+      return `<div class="tp-step ${cls}"><div class="tp-step-dot">${icon}</div><div class="tp-step-label">${esc(s.label)}</div></div>${line}`;
+    }).join('');
+    return `<div class="tp-steps">${steps}</div>`;
+  }
+
+  _renderProgressBar(c) {
+    const pct = c.total ? Math.round((c.current / c.total) * 100) : c.current;
+    return `<div class="tp-progress"><div class="tp-progress-header"><span class="tp-progress-label">${esc(c.label || '')}</span><span class="tp-progress-pct">${pct}%</span></div><div class="tp-progress-track"><div class="tp-progress-fill" style="width:${pct}%"></div></div></div>`;
+  }
+
+  // ─── Info Card ─────────────────────────────────────────────────
+  _renderInfoCard(c) {
+    const badge = c.badge ? `<span class="tp-badge tp-badge--${c.badge.variant || 'info'}">${esc(c.badge.text)}</span>` : '';
+    const highlight = c.highlight ? `<div class="tp-card-highlight">${esc(c.highlight)}</div>` : '';
+    const fields = (c.fields || []).map(f => {
+      const icon = f.icon ? `<span class="tp-cardfield-icon">${f.icon}</span>` : '';
+      return `<div class="tp-cardfield">${icon}<span class="tp-cardfield-label">${esc(f.label)}</span><span class="tp-cardfield-value">${esc(f.value)}</span></div>`;
+    }).join('');
+    const actions = (c.actions || []).map(a => this._renderComponent(a)).join('');
+    return `<div class="tp-card"><div class="tp-card-head"><div class="tp-card-title">${esc(c.title)}</div>${badge}</div><div class="tp-card-fields">${fields}</div>${highlight}${actions ? `<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">${actions}</div>` : ''}</div>`;
+  }
+
+  // ─── Appointment Summary ───────────────────────────────────────
+  _renderAppointmentSummary(c) {
+    const apt = c.appointment || {};
+    const pro = c.taxPro || {};
+    const client = c.client || {};
+    const confId = c.confirmationId ? `<div class="tp-appt-confid">Confirmation: <strong>${esc(c.confirmationId)}</strong></div>` : '';
+    const stars = '★'.repeat(Math.floor(pro.rating || 0)) + (pro.rating % 1 >= 0.5 ? '½' : '');
+    const specs = (pro.specializations || []).map(s => `<span class="tp-badge tp-badge--info">${esc(s)}</span>`).join(' ');
+    const actions = (c.actions || []).map(a => this._renderComponent(a)).join('');
+
+    return `<div class="tp-appt-summary">${confId}
+      <div class="tp-appt-sections">
+        <div class="tp-appt-section">
+          <div class="tp-appt-section-title">📅 Appointment Details</div>
+          ${apt.date ? `<div class="tp-cardfield"><span class="tp-cardfield-icon">📆</span><span class="tp-cardfield-label">Date</span><span class="tp-cardfield-value">${esc(apt.date)}</span></div>` : ''}
+          ${apt.time ? `<div class="tp-cardfield"><span class="tp-cardfield-icon">🕐</span><span class="tp-cardfield-label">Time</span><span class="tp-cardfield-value">${esc(apt.time)}</span></div>` : ''}
+          ${apt.duration ? `<div class="tp-cardfield"><span class="tp-cardfield-icon">⏱</span><span class="tp-cardfield-label">Duration</span><span class="tp-cardfield-value">${esc(apt.duration)}</span></div>` : ''}
+          ${apt.type ? `<div class="tp-cardfield"><span class="tp-cardfield-icon">${apt.type === 'Virtual' ? '💻' : '🏢'}</span><span class="tp-cardfield-label">Type</span><span class="tp-cardfield-value">${esc(apt.type)}</span></div>` : ''}
+          ${apt.location ? `<div class="tp-cardfield"><span class="tp-cardfield-icon">📍</span><span class="tp-cardfield-label">Location</span><span class="tp-cardfield-value">${esc(apt.location)}</span></div>` : ''}
+        </div>
+        <div class="tp-appt-section">
+          <div class="tp-appt-section-title">👨‍💼 Your Tax Professional</div>
+          <div class="tp-appt-pro-header"><div><div class="tp-appt-pro-name">${esc(pro.name || '')}</div><div class="tp-appt-pro-title">${esc(pro.title || '')}</div><div class="tp-appt-pro-rating"><span class="tp-stars">${stars}</span> ${pro.rating || ''}</div></div></div>
+          <div class="tp-appt-pro-specs">${specs}</div>
+        </div>
+        ${client.name ? `<div class="tp-appt-section"><div class="tp-appt-section-title">👤 Client</div><div class="tp-cardfield"><span class="tp-cardfield-label">Name</span><span class="tp-cardfield-value">${esc(client.name)}</span></div>${client.documentStatus ? `<div class="tp-cardfield"><span class="tp-cardfield-label">Documents</span><span class="tp-cardfield-value">${esc(client.documentStatus)}</span></div>` : ''}</div>` : ''}
+      </div>
+      ${actions ? `<div class="tp-appt-actions">${actions}</div>` : ''}
+    </div>`;
+  }
+
+  // ─── Tax Pro Card ──────────────────────────────────────────────
+  _renderTaxProCard(c) {
+    const pro = c.taxPro || {};
+    const recommended = c.recommended ? '<div class="tp-pro-recommended">⭐ Best Match</div>' : '';
+    const reason = c.matchReason ? `<div class="tp-pro-reason">${esc(c.matchReason)}</div>` : '';
+    const stars = '★'.repeat(Math.floor(pro.rating || 0)) + ((pro.rating || 0) % 1 >= 0.5 ? '½' : '');
+    const specs = (pro.specializations || []).map(s => `<span class="tp-badge tp-badge--info">${esc(s)}</span>`).join(' ');
+    const avail = pro.availability ? `<div class="tp-pro-avail">📅 ${esc(pro.availability)}</div>` : '';
+    const actions = (c.actions || []).map(a => this._renderComponent(a)).join('');
+
+    return `<div class="tp-pro-card ${c.recommended ? 'tp-pro-card--recommended' : ''}">
+      ${recommended}
+      <div class="tp-pro-header"><div class="tp-pro-avatar">${(pro.name || 'T').charAt(0)}</div><div class="tp-pro-info"><div class="tp-pro-name">${esc(pro.name || '')}</div><div class="tp-pro-title">${esc(pro.title || '')}</div><div class="tp-pro-rating"><span class="tp-stars">${stars}</span> ${pro.rating || ''}</div></div></div>
+      <div class="tp-pro-specs">${specs}</div>${reason}${avail}
+      ${actions ? `<div class="tp-pro-actions">${actions}</div>` : ''}
+    </div>`;
+  }
+
+  // ─── Checklist ─────────────────────────────────────────────────
+  _renderChecklist(c) {
+    const icon = c.icon ? `<span class="tp-checklist-icon">${c.icon}</span>` : '';
+    const counter = c.counter ? `<span class="tp-checklist-counter">${c.counter.done}/${c.counter.total}</span>` : '';
+    const items = (c.items || []).map(item => {
+      const statusCls = item.status === 'collected' ? 'tp-chk--done' : item.status === 'pending' ? 'tp-chk--pending' : 'tp-chk--required';
+      const statusIcon = item.status === 'collected' ? '✓' : item.status === 'pending' ? '○' : '!';
+      const desc = item.description ? `<div class="tp-chk-desc">${esc(item.description)}</div>` : '';
+      const actions = (item.actions || []).map(a => this._renderComponent(a)).join('');
+      return `<div class="tp-chk-item ${statusCls}"><div class="tp-chk-status">${statusIcon}</div><div class="tp-chk-body"><div class="tp-chk-text">${esc(item.text)}</div>${desc}</div>${actions ? `<div class="tp-chk-actions">${actions}</div>` : ''}</div>`;
+    }).join('');
+
+    return `<div class="tp-checklist"><div class="tp-checklist-header">${icon}<span class="tp-checklist-title">${esc(c.title)}</span>${counter}</div><div class="tp-checklist-items">${items}</div></div>`;
+  }
+
+  // ─── Banner ────────────────────────────────────────────────────
+  _renderBanner(c) {
+    const icon = c.icon ? `<span class="tp-banner-icon">${c.icon}</span>` : '';
+    const dismissId = c.dismissible ? this._uid('bdis') : null;
+    const dismiss = c.dismissible ? `<button id="${dismissId}" class="tp-banner-dismiss">&times;</button>` : '';
+    if (dismissId) {
+      this._bindings.push(el => {
+        const btn = el.querySelector(`#${dismissId}`);
+        if (btn) btn.addEventListener('click', () => { btn.closest('.tp-banner').style.display = 'none'; });
+      });
+    }
+    const confetti = c.confetti ? 'data-confetti="true"' : '';
+    return `<div class="tp-banner tp-banner--${c.variant || 'info'}" ${confetti}>${icon}<span class="tp-banner-text">${esc(c.text)}</span>${dismiss}</div>`;
+  }
+
+  _renderDivider(c) {
+    const label = c.label ? `<span class="tp-divider-label">${esc(c.label)}</span>` : '';
+    return `<div class="tp-divider">${label}</div>`;
+  }
+
+  _renderTextBlock(c) {
+    const cls = { heading: 'tp-text--heading', subheading: 'tp-text--subheading', caption: 'tp-text--caption' }[c.style] || 'tp-text--body';
+    return `<div class="tp-text ${cls}">${esc(c.text)}</div>`;
+  }
+
+  _renderCarousel(c) {
+    const cid = this._uid('carousel');
+    const items = (c.items || []).map(item => `<div class="tp-carousel-item">${this._renderComponent(item)}</div>`).join('');
+    this._bindings.push(el => {
+      const track = el.querySelector(`#${cid}`);
+      if (!track) return;
+      const prev = track.parentElement.querySelector('.tp-carousel-prev');
+      const next = track.parentElement.querySelector('.tp-carousel-next');
+      if (prev) prev.addEventListener('click', () => track.scrollBy({ left: -300, behavior: 'smooth' }));
+      if (next) next.addEventListener('click', () => track.scrollBy({ left: 300, behavior: 'smooth' }));
+    });
+    return `<div class="tp-carousel"><button class="tp-carousel-nav tp-carousel-prev">&lsaquo;</button><div class="tp-carousel-track" id="${cid}">${items}</div><button class="tp-carousel-nav tp-carousel-next">&rsaquo;</button></div>`;
+  }
+
+  // ─── Action handler ────────────────────────────────────────────
+  async _handleAction(action) {
+    if (!action) return;
+
+    switch (action.type) {
+      case 'tool_call': {
+        // Support both field name schemas:
+        //   toolName / toolArgs  — component types (FormGroupComponent.submitAction)
+        //   tool     / parameters — intake formatter (toolCallAction helper)
+        const toolName = action.toolName || action.tool;
+        const toolArgs = action.toolArgs || action.parameters || {};
+        if (!toolName) return;
+
+        // Use a real DOM element so we can reliably remove it in every code path
+        const loadingEl = document.createElement('div');
+        loadingEl.className = 'tp-loading';
+        loadingEl.textContent = `Calling ${toolName}\u2026`;
+        this.root.appendChild(loadingEl);
+
+        try {
+          const result = await this.bridge.callTool(toolName, toolArgs);
+
+          // renderResponse / renderUIResponse both set this.root.innerHTML which
+          // removes the loading element automatically.  Only explicitly remove it
+          // on the paths where no render call occurs.
+          if (result && result.structuredContent) {
+            this.renderResponse(result.structuredContent);
+          } else if (result && result.content) {
+            // Try to parse text content as JSON
+            const textContent = result.content.find(c => c.type === 'text');
+            if (textContent) {
+              try {
+                const parsed = JSON.parse(textContent.text);
+                this.renderUIResponse(parsed);
+              } catch {
+                this.root.innerHTML = `<div class="tp-text tp-text--body">${esc(textContent.text)}</div>`;
+              }
+            } else {
+              // content array present but no text item — remove loading indicator
+              loadingEl.remove();
+            }
+          } else {
+            // No renderable result (tool result will arrive via notification) — remove indicator
+            loadingEl.remove();
+          }
+        } catch (err) {
+          // Re-enable pending submit buttons so the user can retry
+          this.root.querySelectorAll('[data-form-pending="true"]').forEach(b => {
+            b.disabled = false;
+            b.textContent = b.getAttribute('data-original-label') || 'Continue';
+            b.removeAttribute('data-form-pending');
+            b.removeAttribute('data-original-label');
+          });
+          console.error('[Widget] Tool call failed:', err);
+          loadingEl.remove();
+          this.root.insertAdjacentHTML('beforeend',
+            `<div class="tp-banner tp-banner--error">
+              <span class="tp-banner-icon">⚠️</span>
+              <span class="tp-banner-text">Failed to call ${esc(toolName)}: ${esc(err instanceof Error ? err.message : String(err))}</span>
+            </div>`
+          );
+        }
+        break;
+      }
+
+      case 'send_message': {
+        // 1. ChatGPT Apps SDK (preferred)
+        if (window.openai && typeof window.openai.sendFollowUpMessage === 'function') {
+          window.openai.sendFollowUpMessage({ prompt: action.message });
+          break;
+        }
+        // 2. MCP Apps bridge
+        try {
+          await this.bridge.callTool('__send_message', { message: action.message });
+        } catch {
+          console.log('[Widget] Send message:', action.message);
+        }
+        break;
+      }
+
+      case 'navigate': {
+        if (action.screen) {
+          this.state.update({ screen: action.screen });
+        }
+        break;
+      }
+
+      case 'submit_form': {
+        // Form submission — merge formData and call associated tool
+        if (action.toolName) {
+          try {
+            const result = await this.bridge.callTool(action.toolName, {
+              ...(action.toolArgs || {}),
+              ...(action.formData || {}),
+            });
+            if (result && result.structuredContent) {
+              this.renderResponse(result.structuredContent);
+            }
+          } catch (err) {
+            console.error('[Widget] Form submit failed:', err);
+          }
+        }
+        break;
+      }
+    }
+  }
+
+  _uid(prefix) {
+    return `${prefix}_${++this._uidCounter}_${Math.random().toString(36).slice(2, 7)}`;
+  }
+}
 
 
 // ═══════════════════════════════════════════════════════════════════
@@ -487,734 +1192,265 @@ function esc(text) {
 
 
 // ═══════════════════════════════════════════════════════════════════
-// WIDGET RENDERER
+// INITIALIZATION — ChatGPT Apps SDK / Skybridge + MCP Bridge fallback
+//
+// Data priority:
+//   1. window.openai.toolOutput           — ChatGPT Skybridge (primary)
+//   2. openai:set_globals event            — ChatGPT re-hydration
+//   3. ui/notifications/tool-result        — MCP postMessage bridge
+//   4. window.__TAXPILOT_DATA__            — Server-side injected data
+//   5. /api/widget-data REST poll          — Local dev fallback
+//   6. Standalone welcome screen           — No host detected
 // ═══════════════════════════════════════════════════════════════════
 
-const root = document.getElementById('widget-root');
-let _bindings = [];
-let _uidCounter = 0;
+(async function main() {
+  const bridge = new McpAppBridge();
+  const state = new SessionStateManager();
+  const renderer = new WidgetRenderer(bridge, state);
 
-function _uid(prefix) {
-  return `${prefix}_${++_uidCounter}_${Math.random().toString(36).slice(2, 7)}`;
-}
-
-function reportSize() {
-  requestAnimationFrame(() => {
-    const rect = root.getBoundingClientRect();
-    // Notify host of size change if available
-    if (window.parent !== window) {
+  // ── Patch bridge.callTool to prefer window.openai.callTool ────────
+  const origCallTool = bridge.callTool.bind(bridge);
+  bridge.callTool = async function(name, args) {
+    // 1. ChatGPT Apps SDK (preferred — keeps tool call inside ChatGPT context)
+    if (window.openai && typeof window.openai.callTool === 'function') {
       try {
-        window.parent.postMessage({
-          jsonrpc: '2.0',
-          method: 'ui/notifications/size-changed',
-          params: { width: Math.ceil(rect.width), height: Math.ceil(rect.height) },
-        }, '*');
-      } catch {}
-    }
-  });
-}
-
-// ─── Main render entry point ─────────────────────────────────────
-
-function renderResponse(response) {
-  if (!response) return;
-  console.log('[TaxPilot] renderResponse:', response.screen || 'unknown');
-  if (response.stateUpdates) sessionState.update(response.stateUpdates);
-
-  let components = response.components;
-  if (!components && response.screen) {
-    root.innerHTML = `<div class="tp-structured"><div class="tp-text tp-text--body">Screen: ${esc(response.screen)}</div></div>`;
-    return;
-  }
-  if (!components || !Array.isArray(components)) {
-    renderRawData(response);
-    return;
-  }
-
-  _bindings = [];
-  const parts = components.map(c => renderComponent(c));
-  root.innerHTML = `<div class="tp-structured" data-screen="${response.screen || ''}">${parts.join('')}</div>`;
-  _bindings.forEach(fn => fn(root));
-  _bindings = [];
-  reportSize();
-}
-
-function renderRawData(data) {
-  const fields = [];
-  for (const [key, val] of Object.entries(data)) {
-    if (key.startsWith('_')) continue;
-    if (typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean') {
-      fields.push(`<div class="tp-cardfield"><span class="tp-cardfield-label">${esc(key)}</span><span class="tp-cardfield-value">${esc(String(val))}</span></div>`);
-    }
-  }
-  root.innerHTML = fields.length
-    ? `<div class="tp-structured"><div class="tp-card"><div class="tp-card-fields">${fields.join('')}</div></div></div>`
-    : `<div class="tp-structured"><div class="tp-text tp-text--body">Data received</div></div>`;
-  reportSize();
-}
-
-/** Render from any structuredContent payload */
-function renderPayload(payload) {
-  if (!payload) return;
-  if (payload.components && Array.isArray(payload.components)) {
-    renderResponse(payload);
-  } else {
-    renderRawData(payload);
-  }
-}
-
-
-// ─── Component dispatcher ──────────────────────────────────────
-
-function renderComponent(c) {
-  if (!c) return '';
-  const key = c.component || c.type || '';
-  switch (key) {
-    case 'Button':      case 'button':                           return renderButton(c);
-    case 'FormField':   case 'form_field':                       return renderFormField(c);
-    case 'FormGroup':   case 'form_group':                       return renderFormGroup(c);
-    case 'MultiSelectCard':    case 'multi_select':              return renderMultiSelect(c);
-    case 'SelectionCard':      case 'selection_card':            return renderSelectionCard(c);
-    case 'StatusBadge':        case 'status_badge':              return renderStatusBadge(c);
-    case 'StepProgress':       case 'step_progress':             return renderStepProgress(c);
-    case 'ProgressBar':        case 'progress_bar':              return renderProgressBar(c);
-    case 'InfoCard':           case 'info_card':                 return renderInfoCard(c);
-    case 'AppointmentSummaryCard': case 'appointment_summary':   return renderAppointmentSummary(c);
-    case 'TaxProCard':         case 'tax_pro_card':              return renderTaxProCard(c);
-    case 'Checklist':          case 'checklist':                 return renderChecklist(c);
-    case 'Banner':             case 'banner':                    return renderBanner(c);
-    case 'Divider':            case 'divider':                   return renderDivider(c);
-    case 'TextBlock':          case 'text_block':                return renderTextBlock(c);
-    case 'Carousel':           case 'carousel':                  return renderCarousel(c);
-    default: return `<!-- unknown: ${key} -->`;
-  }
-}
-
-// ─── Button ────────────────────────────────────────────────────
-function renderButton(c) {
-  const id = _uid('btn');
-  const variantClass = {
-    danger: 'tp-btn--danger', secondary: 'tp-btn--secondary',
-    ghost: 'tp-btn--ghost', success: 'tp-btn--primary',
-  }[c.variant] || 'tp-btn--primary';
-  const sizeClass = c.size === 'sm' ? 'tp-btn--sm' : c.size === 'lg' ? 'tp-btn--lg' : '';
-  const disabled = c.disabled ? 'disabled' : '';
-  const icon = c.icon ? `<span class="tp-btn-icon">${c.icon}</span>` : '';
-
-  _bindings.push(el => {
-    const btn = el.querySelector(`#${id}`);
-    if (btn) btn.addEventListener('click', () => handleAction(c.action));
-  });
-
-  return `<button id="${id}" class="tp-btn ${variantClass} ${sizeClass}" ${disabled}>${icon}<span>${esc(c.label)}</span></button>`;
-}
-
-// ─── Form Field ────────────────────────────────────────────────
-function renderFormField(c, groupId) {
-  const id = _uid('field');
-  const gid = groupId || '__global';
-  const required = c.required ? 'required' : '';
-  const requiredMark = c.required ? '<span class="tp-required">*</span>' : '';
-  let input = '';
-
-  const fieldType = c.fieldType || c.type;
-  switch (fieldType) {
-    case 'select':
-      input = `<select id="${id}" data-field-id="${esc(c.id)}" class="tp-input tp-select" ${required}>
-        <option value="" disabled selected>${esc(c.placeholder || 'Select...')}</option>
-        ${(c.options || []).map(o => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('')}
-      </select>`;
-      break;
-    case 'textarea':
-      input = `<textarea id="${id}" data-field-id="${esc(c.id)}" class="tp-input tp-textarea" placeholder="${esc(c.placeholder || '')}" rows="3" ${required}></textarea>`;
-      break;
-    case 'date': {
-      const monId = _uid('dmon');
-      const dayId = _uid('dday');
-      const yrId  = _uid('dyr');
-      const monthNames = ['January','February','March','April','May','June',
-                          'July','August','September','October','November','December'];
-      const monthOpts = monthNames.map((m, i) =>
-        `<option value="${String(i + 1).padStart(2, '0')}">${m}</option>`).join('');
-      const dayOpts = Array.from({ length: 31 }, (_, i) =>
-        `<option value="${String(i + 1).padStart(2, '0')}">${i + 1}</option>`).join('');
-      const curYear = new Date().getFullYear();
-      const yearOpts = Array.from({ length: 101 }, (_, i) => curYear - 16 - i)
-        .map(y => `<option value="${y}">${y}</option>`).join('');
-      input =
-        `<div class="tp-date-selects">` +
-        `<input type="hidden" id="${id}" data-field-id="${esc(c.id)}" value="">` +
-        `<select id="${monId}" class="tp-input tp-select tp-date-sel" aria-label="Month">` +
-          `<option value="" disabled selected>Month</option>${monthOpts}` +
-        `</select>` +
-        `<select id="${dayId}" class="tp-input tp-select tp-date-sel" aria-label="Day">` +
-          `<option value="" disabled selected>Day</option>${dayOpts}` +
-        `</select>` +
-        `<select id="${yrId}" class="tp-input tp-select tp-date-sel" aria-label="Year">` +
-          `<option value="" disabled selected>Year</option>${yearOpts}` +
-        `</select>` +
-        `</div>`;
-      _bindings.push(el => {
-        const hidden = el.querySelector(`#${id}`);
-        const mon    = el.querySelector(`#${monId}`);
-        const day    = el.querySelector(`#${dayId}`);
-        const yr     = el.querySelector(`#${yrId}`);
-        const combine = () => {
-          const m = mon ? mon.value : '', d = day ? day.value : '', y = yr ? yr.value : '';
-          const val = (m && d && y) ? `${y}-${m}-${d}` : '';
-          if (hidden) hidden.value = val;
-          sessionState.setFormValue(gid, c.id, val);
-        };
-        [mon, day, yr].forEach(sel => {
-          if (sel) { sel.addEventListener('change', combine); sel.addEventListener('input', combine); }
-        });
-      });
-      break;
-    }
-    case 'email':
-      input = `<input type="email" id="${id}" data-field-id="${esc(c.id)}" class="tp-input" placeholder="${esc(c.placeholder || '')}" ${required}>`;
-      break;
-    case 'phone':
-      input = `<input type="tel" id="${id}" data-field-id="${esc(c.id)}" class="tp-input" placeholder="${esc(c.placeholder || '')}" ${required}>`;
-      break;
-    case 'number':
-      input = `<input type="number" id="${id}" data-field-id="${esc(c.id)}" class="tp-input" placeholder="${esc(c.placeholder || '')}" ${required}>`;
-      break;
-    default:
-      input = `<input type="text" id="${id}" data-field-id="${esc(c.id)}" class="tp-input" placeholder="${esc(c.placeholder || '')}" ${required}>`;
-  }
-
-  const helpText = c.helperText ? `<div class="tp-field-help">${esc(c.helperText)}</div>` : '';
-
-  _bindings.push(el => {
-    const inp = el.querySelector(`#${id}`);
-    if (inp) {
-      const update = () => sessionState.setFormValue(gid, c.id, inp.value);
-      inp.addEventListener('input', update);
-      inp.addEventListener('change', update);
-    }
-  });
-
-  return `<div class="tp-field"><label class="tp-field-label" for="${id}">${esc(c.label)}${requiredMark}</label>${input}${helpText}</div>`;
-}
-
-// ─── Form Group ────────────────────────────────────────────────
-function renderFormGroup(c) {
-  const gid = _uid('fgroup');
-  const title = c.title ? `<div class="tp-form-title">${esc(c.title)}</div>` : '';
-  const subtitle = c.subtitle ? `<div class="tp-form-desc">${esc(c.subtitle)}</div>` : '';
-  const fields = (c.fields || []).map(f => renderFormField(f, gid)).join('');
-  const submitLabel = c.submitLabel || 'Submit';
-  const submitId = _uid('fsubmit');
-
-  _bindings.push(el => {
-    const btn = el.querySelector(`#${submitId}`);
-    if (btn) btn.addEventListener('click', async () => {
-      const values = sessionState.getFormValues(gid);
-
-      // Build a tool_call action from submitAction or action
-      const submitDef = c.submitAction || c.action;
-      if (!submitDef) {
-        console.warn('[TaxPilot] No submitAction/action on form group');
-        return;
-      }
-
-      const toolName = submitDef.toolName || submitDef.tool;
-      if (!toolName) {
-        console.warn('[TaxPilot] No tool name in submitAction:', submitDef);
-        return;
-      }
-
-      // Disable button and show spinner
-      btn.disabled = true;
-      btn.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,0.4);border-top-color:#fff;border-radius:50%;animation:tpSpin 0.6s linear infinite;vertical-align:middle;margin-right:6px"></span>Sending\u2026';
-
-      // Merge form values into tool args and nest under formData for the server
-      const toolArgs = { ...(submitDef.toolArgs || submitDef.parameters || {}) };
-      toolArgs.formData = values;
-
-      console.log('[TaxPilot] Form submit:', toolName, toolArgs);
-
-      try {
-        // Fire the tool call. The host will:
-        //   1. Route it to the MCP server
-        //   2. Get back CallToolResult with structuredContent + _meta.ui.resourceUri
-        //   3. Update window.openai.toolOutput with the new structuredContent
-        //   4. Fire openai:set_globals → our listener re-renders
-        const response = await callTool(toolName, toolArgs);
-
-        // FALLBACK: If the host didn't update toolOutput (set_globals handles it),
-        // check if toolOutput was updated directly
-        setTimeout(() => {
-          const output = getToolOutput();
-          if (output && output !== _lastRenderedPayload) {
-            console.log('[TaxPilot] Fallback: rendering from updated toolOutput');
-            renderPayload(output);
-          }
-        }, 500);
-
-        // FALLBACK 2: Try to parse callTool result text directly
-        if (response && typeof response.result === 'string') {
-          try {
-            const parsed = JSON.parse(response.result);
-            if (parsed && (parsed.components || parsed.screen)) {
-              console.log('[TaxPilot] Fallback: rendering from callTool result text');
-              renderPayload(parsed);
-              return;
-            }
-          } catch { /* not JSON, that's fine — host should handle via toolOutput */ }
+        const result = await window.openai.callTool(name, args);
+        // Per OpenAI dice example: callTool returns { structuredContent: … }.
+        // Normalise: ensure the result always has structuredContent if it has components.
+        if (result && !result.structuredContent && Array.isArray(result.components)) {
+          return { structuredContent: result };
         }
-
-        // FALLBACK 3: response might be the structured content directly
-        if (response && (response.components || response.screen)) {
-          console.log('[TaxPilot] Fallback: rendering from callTool response directly');
-          renderPayload(response);
-          return;
-        }
-
-        if (response && response.structuredContent) {
-          console.log('[TaxPilot] Fallback: rendering from structuredContent');
-          renderPayload(response.structuredContent);
-          return;
-        }
-
-      } catch (err) {
-        console.error('[TaxPilot] Form submit failed:', err);
-        btn.disabled = false;
-        btn.textContent = submitLabel;
-        root.insertAdjacentHTML('beforeend',
-          `<div class="tp-banner tp-banner--error"><span class="tp-banner-icon">\u26A0\uFE0F</span><span class="tp-banner-text">Error: ${esc(err.message)}</span></div>`);
+        return result;
+      } catch (e) {
+        console.warn('[Widget] window.openai.callTool failed, falling back:', e);
       }
+    }
+
+    // 2. MCP Apps postMessage bridge — only when the bridge successfully connected
+    if (bridge._initialized) {
+      return origCallTool(name, args);
+    }
+
+    // 3. Standalone / local-dev fallback — call the REST API directly.
+    //    Without this, the postMessage would time out after 30 s with no parent window.
+    const serverUrl = window.__TAXPILOT_SERVER__ || '';
+    const resp = await fetch(`${serverUrl}/api/tools/call`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, args }),
     });
-  });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    // Normalise the response so existing renderer code works regardless of format
+    if (data.structuredContent) return { structuredContent: data.structuredContent };
+    if (Array.isArray(data.components)) return { structuredContent: data };
+    return { content: [{ type: 'text', text: typeof data.raw === 'string' ? data.raw : JSON.stringify(data) }] };
+  };
 
-  return `<div class="tp-form-group" data-group="${gid}">${title}${subtitle}<div class="tp-form-fields">${fields}</div><button id="${submitId}" class="tp-btn tp-btn--primary tp-form-submit">${esc(submitLabel)}</button></div>`;
-}
+  // ── Helper: render from any structuredContent / UIResponse payload ─
+  function renderPayload(payload) {
+    if (!payload) return;
+    // StructuredUIResponse: { components[], screen }
+    if (payload.components && Array.isArray(payload.components)) {
+      renderer.renderResponse(payload);
+    } else if (payload._ui || payload.data || payload.type || payload.title || payload.cards) {
+      renderer.renderUIResponse(payload);
+    } else {
+      renderer._renderRawData(payload);
+    }
+  }
 
-// ─── Multi-Select ──────────────────────────────────────────────
-function renderMultiSelect(c) {
-  const gid = _uid('msel');
-  const isMulti = c.multiSelect !== false;
-  const submitId = _uid('msubmit');
-  const title = c.title ? `<div class="tp-multisel-title">${esc(c.title)}</div>` : '';
-  const subtitle = c.subtitle ? `<div class="tp-multisel-sub">${esc(c.subtitle)}</div>` : '';
-
-  const options = (c.options || []).map(opt => {
-    const oid = _uid('mopt');
-    const icon = opt.icon ? `<span class="tp-mopt-icon">${opt.icon}</span>` : '';
-    const desc = opt.description ? `<div class="tp-mopt-desc">${esc(opt.description)}</div>` : '';
-
-    _bindings.push(el => {
-      const optEl = el.querySelector(`#${oid}`);
-      if (optEl) optEl.addEventListener('click', () => {
-        if (isMulti) {
-          sessionState.toggleSelection(gid, opt.id);
-          optEl.classList.toggle('tp-mopt--selected');
-        } else {
-          optEl.parentElement.querySelectorAll('.tp-mopt--selected').forEach(s => s.classList.remove('tp-mopt--selected'));
-          sessionState.setSelection(gid, opt.id);
-          optEl.classList.add('tp-mopt--selected');
-        }
-      });
-    });
-
-    return `<div id="${oid}" class="tp-mopt" data-value="${esc(opt.id)}">
-      <div class="tp-mopt-header">${icon}<div class="tp-mopt-text"><div class="tp-mopt-label">${esc(opt.label)}</div>${desc}</div>
-      <div class="tp-mopt-check"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div></div>
+  // ── Step 1: window.openai.toolOutput (sync, set by ChatGPT on load) ─
+  console.log('[Widget] Init - window.openai:', window.openai);
+  if (window.openai && window.openai.toolOutput) {
+    console.log('[Widget] Has toolOutput, rendering');
+    renderPayload(window.openai.toolOutput);
+  } else if (window.openai) {
+    // Host present but no output yet — show ready state
+    console.log('[Widget] Has openai but no toolOutput, showing ready state');
+    renderer.root.innerHTML = `<div class="tp-structured">
+      <div class="tp-text tp-text--heading" style="text-align:center;font-size:15px">🟢 TaxPilot Ready</div>
+      <div class="tp-text tp-text--body" style="text-align:center;color:var(--hrb-text-muted)">Ask the assistant to start your tax intake &mdash; results will appear here.</div>
     </div>`;
-  }).join('');
+  }
 
-  _bindings.push(el => {
-    const btn = el.querySelector(`#${submitId}`);
-    if (btn) btn.addEventListener('click', async () => {
-      const selected = sessionState.getSelections(gid);
-      if (c.minSelect && selected.length < c.minSelect) return;
+  // ── Step 2: openai:set_globals event (ChatGPT fires this on re-renders) ─
+  window.addEventListener('openai:set_globals', (event) => {
+    // toolOutput may be in event.detail.globals or in window.openai directly
+    const output = (event.detail && event.detail.globals && event.detail.globals.toolOutput)
+      || (window.openai && window.openai.toolOutput);
+    if (output) {
+      renderPayload(output);
+    }
+  }, { passive: true });
 
-      const submitDef = c.submitAction || c.action;
-      if (!submitDef) return;
+  // ── Step 3: MCP Apps bridge notifications ─────────────────────────
 
-      const toolName = submitDef.toolName || submitDef.tool;
-      if (!toolName) return;
-
-      btn.disabled = true;
-      btn.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,0.4);border-top-color:#fff;border-radius:50%;animation:tpSpin 0.6s linear infinite;vertical-align:middle;margin-right:6px"></span>Sending\u2026';
-
-      const toolArgs = { ...(submitDef.toolArgs || submitDef.parameters || {}) };
-      toolArgs.selections = selected;
-
-      console.log('[TaxPilot] Multi-select submit:', toolName, toolArgs);
-
-      try {
-        const response = await callTool(toolName, toolArgs);
-
-        // Same fallback chain as form group
-        setTimeout(() => {
-          const output = getToolOutput();
-          if (output && output !== _lastRenderedPayload) renderPayload(output);
-        }, 500);
-
-        if (response && typeof response.result === 'string') {
-          try {
-            const parsed = JSON.parse(response.result);
-            if (parsed && (parsed.components || parsed.screen)) { renderPayload(parsed); return; }
-          } catch {}
-        }
-        if (response && (response.components || response.screen)) { renderPayload(response); return; }
-        if (response && response.structuredContent) { renderPayload(response.structuredContent); return; }
-
-      } catch (err) {
-        console.error('[TaxPilot] Multi-select submit failed:', err);
-        btn.disabled = false;
-        btn.textContent = c.submitLabel || 'Continue';
-      }
-    });
+  bridge.onNotification('ui/notifications/tool-input', (_params) => {
+    // Tool call in flight — optionally show a subtle loading indicator
   });
 
-  return `<div class="tp-multisel" data-group="${gid}">${title}${subtitle}<div class="tp-multisel-options">${options}</div><button id="${submitId}" class="tp-btn tp-btn--primary">${esc(c.submitLabel || 'Continue')}</button></div>`;
-}
-
-// ─── Selection Card ────────────────────────────────────────────
-function renderSelectionCard(c) {
-  const title = c.title ? `<div class="tp-sel-title">${esc(c.title)}</div>` : '';
-  const options = (c.options || []).map(opt => {
-    const oid = _uid('sopt');
-    const icon = opt.icon ? `<span class="tp-sopt-icon">${opt.icon}</span>` : '';
-    const badge = opt.badge ? `<span class="tp-sopt-badge">${esc(opt.badge)}</span>` : '';
-    const desc = opt.description ? `<div class="tp-sopt-desc">${esc(opt.description)}</div>` : '';
-
-    _bindings.push(el => {
-      const optEl = el.querySelector(`#${oid}`);
-      if (optEl) optEl.addEventListener('click', async () => {
-        optEl.closest('.tp-sel-options').querySelectorAll('.tp-sopt--selected').forEach(s => s.classList.remove('tp-sopt--selected'));
-        optEl.classList.add('tp-sopt--selected');
-
-        if (c.action) {
-          const toolName = c.action.toolName || c.action.tool;
-          if (!toolName) return;
-
-          const toolArgs = { ...(c.action.toolArgs || c.action.parameters || {}) };
-          toolArgs.selection = opt.id;
-
-          console.log('[TaxPilot] Selection:', toolName, toolArgs);
-
-          try {
-            const response = await callTool(toolName, toolArgs);
-
-            // Fallback chain
-            setTimeout(() => {
-              const output = getToolOutput();
-              if (output && output !== _lastRenderedPayload) renderPayload(output);
-            }, 500);
-
-            if (response && typeof response.result === 'string') {
-              try {
-                const parsed = JSON.parse(response.result);
-                if (parsed && (parsed.components || parsed.screen)) { renderPayload(parsed); return; }
-              } catch {}
-            }
-            if (response && (response.components || response.screen)) { renderPayload(response); return; }
-            if (response && response.structuredContent) { renderPayload(response.structuredContent); return; }
-
-          } catch (err) {
-            console.error('[TaxPilot] Selection failed:', err);
-          }
-        }
-      });
-    });
-
-    return `<div id="${oid}" class="tp-sopt" data-value="${esc(opt.id)}">${icon}<div class="tp-sopt-text"><div class="tp-sopt-label">${esc(opt.label)}${badge}</div>${desc}</div></div>`;
-  }).join('');
-
-  return `<div class="tp-sel">${title}<div class="tp-sel-options">${options}</div></div>`;
-}
-
-// ─── Simple components ─────────────────────────────────────────
-function renderStatusBadge(c) {
-  const icon = c.icon ? `<span class="tp-badge-icon">${c.icon}</span>` : '';
-  return `<span class="tp-badge tp-badge--${c.variant || 'info'}">${icon}${esc(c.text)}</span>`;
-}
-
-function renderStepProgress(c) {
-  const steps = (c.steps || []).map((s, i) => {
-    const cls = s.status === 'done' ? 'tp-step--done' : s.status === 'active' ? 'tp-step--active' : 'tp-step--upcoming';
-    const icon = s.status === 'done' ? (s.icon || '\u2713') : String(i + 1);
-    const line = i < (c.steps || []).length - 1
-      ? `<div class="tp-step-line ${s.status === 'done' ? 'tp-step-line--done' : ''}"></div>` : '';
-    return `<div class="tp-step ${cls}"><div class="tp-step-dot">${icon}</div><div class="tp-step-label">${esc(s.label)}</div></div>${line}`;
-  }).join('');
-  return `<div class="tp-steps">${steps}</div>`;
-}
-
-function renderProgressBar(c) {
-  const pct = c.total ? Math.round((c.current / c.total) * 100) : c.current;
-  return `<div class="tp-progress"><div class="tp-progress-header"><span class="tp-progress-label">${esc(c.label || '')}</span><span class="tp-progress-pct">${pct}%</span></div><div class="tp-progress-track"><div class="tp-progress-fill" style="width:${pct}%"></div></div></div>`;
-}
-
-// ─── Info Card ─────────────────────────────────────────────────
-function renderInfoCard(c) {
-  const badge = c.badge ? `<span class="tp-badge tp-badge--${c.badge.variant || 'info'}">${esc(c.badge.text)}</span>` : '';
-  const highlight = c.highlight ? `<div class="tp-card-highlight">${esc(c.highlight)}</div>` : '';
-  const fields = (c.fields || []).map(f => {
-    const icon = f.icon ? `<span class="tp-cardfield-icon">${f.icon}</span>` : '';
-    return `<div class="tp-cardfield">${icon}<span class="tp-cardfield-label">${esc(f.label)}</span><span class="tp-cardfield-value">${esc(f.value)}</span></div>`;
-  }).join('');
-  const actions = (c.actions || []).map(a => renderComponent(a)).join('');
-  return `<div class="tp-card"><div class="tp-card-head"><div class="tp-card-title">${esc(c.title)}</div>${badge}</div><div class="tp-card-fields">${fields}</div>${highlight}${actions ? `<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">${actions}</div>` : ''}</div>`;
-}
-
-// ─── Appointment Summary ───────────────────────────────────────
-function renderAppointmentSummary(c) {
-  const apt = c.appointment || {};
-  const pro = c.taxPro || {};
-  const client = c.client || {};
-  const confId = c.confirmationId ? `<div class="tp-appt-confid">Confirmation: <strong>${esc(c.confirmationId)}</strong></div>` : '';
-  const stars = '\u2605'.repeat(Math.floor(pro.rating || 0)) + (pro.rating % 1 >= 0.5 ? '\u00BD' : '');
-  const specs = (pro.specializations || []).map(s => `<span class="tp-badge tp-badge--info">${esc(s)}</span>`).join(' ');
-  const actions = (c.actions || []).map(a => renderComponent(a)).join('');
-
-  return `<div class="tp-appt-summary">${confId}
-    <div class="tp-appt-sections">
-      <div class="tp-appt-section">
-        <div class="tp-appt-section-title">\uD83D\uDCC5 Appointment Details</div>
-        ${apt.date ? `<div class="tp-cardfield"><span class="tp-cardfield-icon">\uD83D\uDCC6</span><span class="tp-cardfield-label">Date</span><span class="tp-cardfield-value">${esc(apt.date)}</span></div>` : ''}
-        ${apt.time ? `<div class="tp-cardfield"><span class="tp-cardfield-icon">\uD83D\uDD50</span><span class="tp-cardfield-label">Time</span><span class="tp-cardfield-value">${esc(apt.time)}</span></div>` : ''}
-        ${apt.duration ? `<div class="tp-cardfield"><span class="tp-cardfield-icon">\u23F1</span><span class="tp-cardfield-label">Duration</span><span class="tp-cardfield-value">${esc(apt.duration)}</span></div>` : ''}
-        ${apt.type ? `<div class="tp-cardfield"><span class="tp-cardfield-icon">${apt.type === 'Virtual' ? '\uD83D\uDCBB' : '\uD83C\uDFE2'}</span><span class="tp-cardfield-label">Type</span><span class="tp-cardfield-value">${esc(apt.type)}</span></div>` : ''}
-        ${apt.location ? `<div class="tp-cardfield"><span class="tp-cardfield-icon">\uD83D\uDCCD</span><span class="tp-cardfield-label">Location</span><span class="tp-cardfield-value">${esc(apt.location)}</span></div>` : ''}
-      </div>
-      <div class="tp-appt-section">
-        <div class="tp-appt-section-title">\uD83D\uDC68\u200D\uD83D\uDCBC Your Tax Professional</div>
-        <div class="tp-appt-pro-header"><div><div class="tp-appt-pro-name">${esc(pro.name || '')}</div><div class="tp-appt-pro-title">${esc(pro.title || '')}</div><div class="tp-appt-pro-rating"><span class="tp-stars">${stars}</span> ${pro.rating || ''}</div></div></div>
-        <div class="tp-appt-pro-specs">${specs}</div>
-      </div>
-      ${client.name ? `<div class="tp-appt-section"><div class="tp-appt-section-title">\uD83D\uDC64 Client</div><div class="tp-cardfield"><span class="tp-cardfield-label">Name</span><span class="tp-cardfield-value">${esc(client.name)}</span></div>${client.documentStatus ? `<div class="tp-cardfield"><span class="tp-cardfield-label">Documents</span><span class="tp-cardfield-value">${esc(client.documentStatus)}</span></div>` : ''}</div>` : ''}
-    </div>
-    ${actions ? `<div class="tp-appt-actions">${actions}</div>` : ''}
-  </div>`;
-}
-
-// ─── Tax Pro Card ──────────────────────────────────────────────
-function renderTaxProCard(c) {
-  const pro = c.taxPro || {};
-  const recommended = c.recommended ? '<div class="tp-pro-recommended">\u2B50 Best Match</div>' : '';
-  const reason = c.matchReason ? `<div class="tp-pro-reason">${esc(c.matchReason)}</div>` : '';
-  const stars = '\u2605'.repeat(Math.floor(pro.rating || 0)) + ((pro.rating || 0) % 1 >= 0.5 ? '\u00BD' : '');
-  const specs = (pro.specializations || []).map(s => `<span class="tp-badge tp-badge--info">${esc(s)}</span>`).join(' ');
-  const avail = pro.availability ? `<div class="tp-pro-avail">\uD83D\uDCC5 ${esc(pro.availability)}</div>` : '';
-  const actions = (c.actions || []).map(a => renderComponent(a)).join('');
-
-  return `<div class="tp-pro-card ${c.recommended ? 'tp-pro-card--recommended' : ''}">
-    ${recommended}
-    <div class="tp-pro-header"><div class="tp-pro-avatar">${(pro.name || 'T').charAt(0)}</div><div class="tp-pro-info"><div class="tp-pro-name">${esc(pro.name || '')}</div><div class="tp-pro-title">${esc(pro.title || '')}</div><div class="tp-pro-rating"><span class="tp-stars">${stars}</span> ${pro.rating || ''}</div></div></div>
-    <div class="tp-pro-specs">${specs}</div>${reason}${avail}
-    ${actions ? `<div class="tp-pro-actions">${actions}</div>` : ''}
-  </div>`;
-}
-
-// ─── Checklist ─────────────────────────────────────────────────
-function renderChecklist(c) {
-  const icon = c.icon ? `<span class="tp-checklist-icon">${c.icon}</span>` : '';
-  const counter = c.counter ? `<span class="tp-checklist-counter">${c.counter.done}/${c.counter.total}</span>` : '';
-  const items = (c.items || []).map(item => {
-    const statusCls = item.status === 'collected' ? 'tp-chk--done' : item.status === 'pending' ? 'tp-chk--pending' : 'tp-chk--required';
-    const statusIcon = item.status === 'collected' ? '\u2713' : item.status === 'pending' ? '\u25CB' : '!';
-    const desc = item.description ? `<div class="tp-chk-desc">${esc(item.description)}</div>` : '';
-    const actions = (item.actions || []).map(a => renderComponent(a)).join('');
-    return `<div class="tp-chk-item ${statusCls}"><div class="tp-chk-status">${statusIcon}</div><div class="tp-chk-body"><div class="tp-chk-text">${esc(item.text)}</div>${desc}</div>${actions ? `<div class="tp-chk-actions">${actions}</div>` : ''}</div>`;
-  }).join('');
-
-  return `<div class="tp-checklist"><div class="tp-checklist-header">${icon}<span class="tp-checklist-title">${esc(c.title)}</span>${counter}</div><div class="tp-checklist-items">${items}</div></div>`;
-}
-
-// ─── Banner ────────────────────────────────────────────────────
-function renderBanner(c) {
-  const icon = c.icon ? `<span class="tp-banner-icon">${c.icon}</span>` : '';
-  const dismissId = c.dismissible ? _uid('bdis') : null;
-  const dismiss = c.dismissible ? `<button id="${dismissId}" class="tp-banner-dismiss">&times;</button>` : '';
-  if (dismissId) {
-    _bindings.push(el => {
-      const btn = el.querySelector(`#${dismissId}`);
-      if (btn) btn.addEventListener('click', () => { btn.closest('.tp-banner').style.display = 'none'; });
-    });
-  }
-  const confetti = c.confetti ? 'data-confetti="true"' : '';
-  return `<div class="tp-banner tp-banner--${c.variant || 'info'}" ${confetti}>${icon}<span class="tp-banner-text">${esc(c.text)}</span>${dismiss}</div>`;
-}
-
-function renderDivider(c) {
-  const label = c.label ? `<span class="tp-divider-label">${esc(c.label)}</span>` : '';
-  return `<div class="tp-divider">${label}</div>`;
-}
-
-function renderTextBlock(c) {
-  const cls = { heading: 'tp-text--heading', subheading: 'tp-text--subheading', caption: 'tp-text--caption' }[c.style] || 'tp-text--body';
-  return `<div class="tp-text ${cls}">${esc(c.text)}</div>`;
-}
-
-function renderCarousel(c) {
-  const cid = _uid('carousel');
-  const items = (c.items || []).map(item => `<div class="tp-carousel-item">${renderComponent(item)}</div>`).join('');
-  _bindings.push(el => {
-    const track = el.querySelector(`#${cid}`);
-    if (!track) return;
-    const prev = track.parentElement.querySelector('.tp-carousel-prev');
-    const next = track.parentElement.querySelector('.tp-carousel-next');
-    if (prev) prev.addEventListener('click', () => track.scrollBy({ left: -300, behavior: 'smooth' }));
-    if (next) next.addEventListener('click', () => track.scrollBy({ left: 300, behavior: 'smooth' }));
+  bridge.onNotification('ui/notifications/tool-result', (params) => {
+    if (params.structuredContent) {
+      renderPayload(params.structuredContent);
+      return;
+    }
+    if (params.content && Array.isArray(params.content)) {
+      const tc = params.content.find(c => c.type === 'text');
+      if (tc) {
+        try { renderPayload(JSON.parse(tc.text)); }
+        catch { renderer.root.innerHTML = `<div class="tp-text tp-text--body" style="padding:16px">${esc(tc.text)}</div>`; }
+      }
+    }
   });
-  return `<div class="tp-carousel"><button class="tp-carousel-nav tp-carousel-prev">&lsaquo;</button><div class="tp-carousel-track" id="${cid}">${items}</div><button class="tp-carousel-nav tp-carousel-next">&rsaquo;</button></div>`;
-}
 
+  bridge.onNotification('ui/notifications/tool-cancelled', (params) => {
+    renderer.root.innerHTML = `<div class="tp-banner tp-banner--warning"><span class="tp-banner-icon">⚠️</span><span class="tp-banner-text">${esc(params.reason || 'Operation cancelled')}</span></div>`;
+  });
 
-// ─── Action handler ────────────────────────────────────────────
-async function handleAction(action) {
-  if (!action) return;
-  console.log('[TaxPilot] handleAction:', action.type, action);
-
-  switch (action.type) {
-    case 'tool_call': {
-      const toolName = action.toolName || action.tool;
-      const toolArgs = action.toolArgs || action.parameters || {};
-      if (!toolName) {
-        console.warn('[TaxPilot] No tool name in action:', action);
-        return;
+  bridge.onNotification('ui/notifications/host-context-changed', (params) => {
+    if (params.styles && params.styles.variables) {
+      const docRoot = document.documentElement;
+      for (const [key, value] of Object.entries(params.styles.variables)) {
+        if (value) docRoot.style.setProperty(key, value);
       }
-
-      const loadingEl = document.createElement('div');
-      loadingEl.className = 'tp-loading';
-      loadingEl.textContent = 'Loading\u2026';
-      root.appendChild(loadingEl);
-
-      try {
-        const response = await callTool(toolName, toolArgs);
-
-        // Fallback chain (same as form group)
-        setTimeout(() => {
-          const output = getToolOutput();
-          if (output && output !== _lastRenderedPayload) renderPayload(output);
-        }, 500);
-
-        if (response && typeof response.result === 'string') {
-          try {
-            const parsed = JSON.parse(response.result);
-            if (parsed && (parsed.components || parsed.screen)) { renderPayload(parsed); return; }
-          } catch {}
-        }
-        if (response && (response.components || response.screen)) { renderPayload(response); return; }
-        if (response && response.structuredContent) { renderPayload(response.structuredContent); return; }
-
-        // If no fallback rendered, remove loading
-        loadingEl.remove();
-
-      } catch (err) {
-        console.error('[TaxPilot] Tool call failed:', err);
-        loadingEl.remove();
-        root.insertAdjacentHTML('beforeend',
-          `<div class="tp-banner tp-banner--error">
-            <span class="tp-banner-icon">\u26A0\uFE0F</span>
-            <span class="tp-banner-text">Failed: ${esc(err.message)}</span>
-          </div>`);
-      }
-      break;
     }
+  });
 
-    case 'send_message': {
-      // Use the standard MCP Apps API
-      if (window.openai && typeof window.openai.sendFollowUpMessage === 'function') {
-        window.openai.sendFollowUpMessage({ prompt: action.message });
-      }
-      break;
-    }
-
-    case 'navigate': {
-      if (action.screen) sessionState.update({ screen: action.screen });
-      break;
-    }
-  }
-}
-
-
-// ═══════════════════════════════════════════════════════════════════
-// INITIALIZATION
-// Following sebderhy/mcp-app-template pattern EXACTLY:
-//   1. window.openai.toolOutput → initial render
-//   2. openai:set_globals event → re-render when host updates toolOutput
-//   3. window.openai.callTool → widget-initiated tool calls
-//
-// Per use-host-global.ts: host fires 'openai:set_globals' CustomEvent
-//   whenever any global changes. We check if 'toolOutput' was one
-//   of the changed keys and read from window.openai.toolOutput.
-//
-// Per use-widget-props.ts: reads window.openai.toolOutput directly.
-// ═══════════════════════════════════════════════════════════════════
-
-// Track last rendered payload to avoid no-op re-renders
-let _lastRenderedPayload = null;
-
-function renderIfNew(payload) {
-  if (!payload) return;
-  if (payload === _lastRenderedPayload) return; // same object, skip
-  _lastRenderedPayload = payload;
-  renderPayload(payload);
-}
-
-// ── Listen for openai:set_globals ───────────────────────────────
-// Per use-host-global.ts: when the event fires, the value is already
-//   set on window.openai[key]. We just need to read and re-render.
-window.addEventListener('openai:set_globals', function(event) {
-  console.log('[TaxPilot] openai:set_globals fired');
-
-  var globals = event && event.detail && event.detail.globals;
-  if (!globals) {
-    console.log('[TaxPilot] set_globals: no globals in event');
+  // ── If window.openai is already present, skip bridge init ─────────
+  if (window.openai) {
+    console.log('[Widget] window.openai present, skipping bridge init');
     return;
   }
 
-  // If toolOutput was updated, re-render from window.openai.toolOutput
-  // (the canonical source, per use-widget-props.ts)
-  if ('toolOutput' in globals || globals.toolOutput !== undefined) {
-    var output = window.openai && window.openai.toolOutput;
-    if (output) {
-      console.log('[TaxPilot] set_globals: rendering from updated toolOutput');
-      renderIfNew(output);
+  // ── Otherwise: attempt bridge handshake (MCP Apps / standalone) ───
+  console.log('[Widget] Attempting bridge initialization...');
+  const hostResult = await bridge.initialize();
+  console.log('[Widget] Bridge init result:', hostResult);
+
+  if (hostResult) {
+    // Bridge connected — apply host theme
+    if (hostResult.hostContext && hostResult.hostContext.styles && hostResult.hostContext.styles.variables) {
+      const docRoot = document.documentElement;
+      for (const [key, value] of Object.entries(hostResult.hostContext.styles.variables)) {
+        if (value) docRoot.style.setProperty(key, value);
+      }
     }
+    // Don't overwrite any data already rendered by window.openai
+    if (!renderer.root.querySelector('.tp-structured:not(:empty)')) {
+      renderer.root.innerHTML = `<div class="tp-structured">
+        <div class="tp-text tp-text--heading" style="text-align:center;font-size:15px">🟢 TaxPilot Ready</div>
+        <div class="tp-text tp-text--body" style="text-align:center;color:var(--hrb-text-muted)">Connected — ask the assistant to start your tax intake.</div>
+      </div>`;
+    }
+  } else {
+    // ── Standalone / local dev mode ───────────────────────────────────
+    console.log('[Widget] Entering standalone mode');
+
+    // Check for embedded static data
+    const embeddedData = window.__TAXPILOT_DATA__ || null;
+    if (embeddedData && (embeddedData.components || embeddedData.screen || embeddedData._ui || embeddedData.data)) {
+      renderPayload(embeddedData);
+      return;
+    }
+
+    // Welcome screen with interactive buttons for standalone testing
+    renderer.root.innerHTML = `<div class="tp-structured" style="align-items:center;text-align:center;gap:14px;padding:20px 12px">
+      <div style="width:60px;height:60px;border-radius:16px;background:var(--hrb-green);color:#fff;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:900;box-shadow:0 4px 14px rgba(0,161,58,0.3)">H</div>
+      <div>
+        <div class="tp-text tp-text--heading">TaxPilot by H&amp;R Block</div>
+        <div class="tp-text tp-text--body" style="margin-top:4px;max-width:320px">Your AI-powered tax preparation assistant.</div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:8px">
+        <button id="tp-start-intake" class="tp-btn tp-btn--primary" style="padding:10px 20px">📋 Start Tax Intake</button>
+        <button id="tp-checklist" class="tp-btn tp-btn--secondary" style="padding:10px 20px">📄 Document Checklist</button>
+        <button id="tp-find-pro" class="tp-btn tp-btn--secondary" style="padding:10px 20px">👨‍💼 Find Tax Pro</button>
+      </div>
+      <div style="font-size:12px;color:var(--hrb-text-muted);background:var(--hrb-beige);padding:10px 16px;border-radius:8px;width:100%;line-height:1.6;margin-top:8px">
+        <strong>Standalone mode:</strong> Click a button above to test the widget functionality.
+      </div>
+    </div>`;
+
+    // Attach button handlers - query within root element
+    const startBtn = renderer.root.querySelector('#tp-start-intake');
+    const checklistBtn = renderer.root.querySelector('#tp-checklist');
+    const findProBtn = renderer.root.querySelector('#tp-find-pro');
+
+    console.log('[Widget] Standalone buttons:', { startBtn, checklistBtn, findProBtn });
+
+    if (startBtn) {
+      startBtn.addEventListener('click', async function() {
+        console.log('[Widget] Start intake clicked');
+        startBtn.disabled = true;
+        startBtn.textContent = 'Loading...';
+        try {
+          const result = await bridge.callTool('start_intake', {});
+          console.log('[Widget] start_intake result:', result);
+          if (result?.structuredContent) renderer.renderResponse(result.structuredContent);
+        } catch (e) {
+          console.error('[Widget] start_intake failed:', e);
+          startBtn.disabled = false;
+          startBtn.textContent = '📋 Start Tax Intake';
+        }
+      });
+    }
+
+    if (checklistBtn) {
+      checklistBtn.addEventListener('click', async function() {
+        console.log('[Widget] Checklist clicked');
+        checklistBtn.disabled = true;
+        checklistBtn.textContent = 'Loading...';
+        try {
+          const result = await bridge.callTool('get_document_checklist', { filingStatus: 'single', incomeTypes: ['W2'] });
+          console.log('[Widget] checklist result:', result);
+          if (result?.structuredContent) renderer.renderResponse(result.structuredContent);
+        } catch (e) {
+          console.error('[Widget] checklist failed:', e);
+          checklistBtn.disabled = false;
+          checklistBtn.textContent = '📄 Document Checklist';
+        }
+      });
+    }
+
+    if (findProBtn) {
+      findProBtn.addEventListener('click', async function() {
+        console.log('[Widget] Find pro clicked');
+        findProBtn.disabled = true;
+        findProBtn.textContent = 'Loading...';
+        try {
+          const result = await bridge.callTool('find_tax_professional', { zipCode: '10001', specialties: ['general'] });
+          console.log('[Widget] find pro result:', result);
+          if (result?.structuredContent) renderer.renderResponse(result.structuredContent);
+        } catch (e) {
+          console.error('[Widget] find pro failed:', e);
+          findProBtn.disabled = false;
+          findProBtn.textContent = '👨‍💼 Find Tax Pro';
+        }
+      });
+    }
+
+    // Poll REST API for live tool results (local dev)
+    const serverUrl = window.__TAXPILOT_SERVER__ || '';
+    let lastVersion = 0;
+    let pollCount = 0;
+
+    async function pollForData() {
+      if (pollCount++ >= 600) return; // max 10 min
+      try {
+        const resp = await fetch(`${serverUrl}/api/widget-data`, { mode: 'cors' });
+        if (resp.ok) {
+          const json = await resp.json();
+          if (json.version > lastVersion && json.data) {
+            lastVersion = json.version;
+            renderPayload(json.data);
+          }
+        }
+      } catch {}
+      setTimeout(pollForData, 1000);
+    }
+    pollForData();
   }
-
-  // Apply theme changes
-  if (globals.theme) {
-    document.documentElement.setAttribute('data-theme', globals.theme);
-  }
-}, false);
-
-// ── Render initial toolOutput if available ──────────────────────
-// Per use-widget-props.ts: reads window.openai.toolOutput directly
-console.log('[TaxPilot] Init: window.openai =', typeof window.openai, window.openai ? Object.keys(window.openai) : 'N/A');
-
-if (window.openai && window.openai.toolOutput) {
-  console.log('[TaxPilot] Init: rendering from toolOutput');
-  renderPayload(window.openai.toolOutput);
-} else {
-  console.log('[TaxPilot] Init: no toolOutput, showing welcome');
-  // Show welcome/ready state
-  root.innerHTML = '<div class="tp-structured" style="align-items:center;text-align:center;gap:14px;padding:20px 12px">' +
-    '<div style="width:60px;height:60px;border-radius:16px;background:var(--hrb-green);color:#fff;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:900;box-shadow:0 4px 14px rgba(0,161,58,0.3)">H</div>' +
-    '<div>' +
-      '<div class="tp-text tp-text--heading">TaxPilot by H&amp;R Block</div>' +
-      '<div class="tp-text tp-text--body" style="margin-top:4px;max-width:320px">Your AI-powered tax preparation assistant.</div>' +
-    '</div>' +
-    '<div style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center">' +
-      '<span style="padding:5px 12px;border-radius:20px;font-size:12px;font-weight:600;background:var(--hrb-green-light);color:var(--hrb-green-dark)">\uD83D\uDCCB Guided Intake</span>' +
-      '<span style="padding:5px 12px;border-radius:20px;font-size:12px;font-weight:600;background:var(--hrb-green-light);color:var(--hrb-green-dark)">\uD83D\uDCC4 Document Checklist</span>' +
-      '<span style="padding:5px 12px;border-radius:20px;font-size:12px;font-weight:600;background:var(--hrb-green-light);color:var(--hrb-green-dark)">\uD83D\uDC68\u200D\uD83D\uDCBC Tax Pro Matching</span>' +
-      '<span style="padding:5px 12px;border-radius:20px;font-size:12px;font-weight:600;background:var(--hrb-green-light);color:var(--hrb-green-dark)">\uD83D\uDCC5 Scheduling</span>' +
-    '</div>' +
-    '<div style="font-size:12px;color:var(--hrb-text-muted);background:var(--hrb-beige);padding:10px 16px;border-radius:8px;width:100%;line-height:1.6">' +
-      '<strong>Try saying:</strong> &quot;Start my tax intake&quot; &middot; &quot;Show my document checklist&quot; &middot; &quot;Find a tax professional&quot;' +
-    '</div>' +
-  '</div>';
-}
-
-console.log('[TaxPilot] Widget initialized');
+})();
 </script>
 </body>
 </html>

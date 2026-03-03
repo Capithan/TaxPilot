@@ -229,15 +229,32 @@ function executeTool(name, args) {
             }
             case 'process_intake_response': {
                 const step = args.step;
-                const formData = args.formData;
+                let formData = args.formData;
                 const selection = args.selection;
                 const selections = args.selections;
+                // Widget submissions send form fields at the top level (e.g. firstName, lastName)
+                // rather than nested under formData. If formData wasn't provided, extract it.
+                if (!formData && step && args && typeof args === 'object') {
+                    const knownKeys = new Set(['sessionId', 'step', 'formData', 'selection', 'selections', 'answer']);
+                    const extracted = {};
+                    for (const [key, value] of Object.entries(args)) {
+                        if (knownKeys.has(key))
+                            continue;
+                        if (value === undefined || value === null)
+                            continue;
+                        extracted[key] = String(value);
+                    }
+                    if (Object.keys(extracted).length > 0) {
+                        formData = extracted;
+                    }
+                }
                 let result;
                 if (step && (formData || selection || selections)) {
                     result = processStructuredIntakeResponse(args.sessionId, step, formData, selection, selections);
                 }
                 else {
-                    result = processIntakeResponse(args.sessionId, args.answer);
+                    // Defensive: args.answer can be missing if the caller is using structured args
+                    result = processIntakeResponse(args.sessionId, args.answer ?? '');
                 }
                 // Build structured UI for the next step
                 const sessionId = args.sessionId;
