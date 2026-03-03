@@ -1052,7 +1052,10 @@ app.get('/sse', (req: Request, res: Response) => {
   // Some proxies (including certain Azure/IIS configurations) buffer small chunks
   // and won't deliver *any* bytes to the client until a threshold is reached.
   // Send an initial padded SSE comment to force the first flush.
-  res.write(`:${' '.repeat(2048)}\n\n`);
+  res.write(`:${' '.repeat(16384)}\n\n`);
+  // If the runtime provides res.flush (e.g., via certain middleware), use it.
+  // This is a no-op on plain Express Response.
+  (res as unknown as { flush?: () => void }).flush?.();
   
   // Generate session ID using crypto
   const sessionId = crypto.randomUUID();
@@ -1100,7 +1103,8 @@ app.get('/mcp', (req: Request, res: Response) => {
   res.flushHeaders();
 
   // See /sse handler — force an initial flush to defeat proxy buffering.
-  res.write(`:${' '.repeat(2048)}\n\n`);
+  res.write(`:${' '.repeat(16384)}\n\n`);
+  (res as unknown as { flush?: () => void }).flush?.();
   const sessionId = crypto.randomUUID();
   const messagesUrl = `https://${req.get('host')}/messages?sessionId=${sessionId}`;
   sseSessions.set(sessionId, res);
