@@ -11,6 +11,6 @@
  *   3. window.openai.toolOutput has the initial structuredContent
  *   4. Widget JS reads data and renders HRB-branded components
  */
-export declare const APP_WIDGET_MIME_TYPE = "text/html+skybridge";
+export declare const APP_WIDGET_MIME_TYPE = "text/html;profile=mcp-app";
 export declare function getAppWidgetHtml(): string;
 //# sourceMappingURL=appWidgetHtml.d.ts.map

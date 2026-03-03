@@ -16,7 +16,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-export const APP_WIDGET_MIME_TYPE = 'text/html+skybridge';
+export const APP_WIDGET_MIME_TYPE = 'text/html;profile=mcp-app';
 
 export function getAppWidgetHtml(): string {
   // Prefer the checked-in static widget file first. It is easier to reason
