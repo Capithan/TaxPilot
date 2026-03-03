@@ -62,8 +62,38 @@ jobs:
         timeout-minutes: 5
         continue-on-error: false
 
-      - name: 'Deploy to Azure Web App'
-        id: deploy-to-webapp
+      # OneDeploy can return 409 if a previous deployment is still finalizing.
+      # Retrying after a short wait is typically enough to unblock.
+      - name: 'Deploy to Azure Web App (attempt 1)'
+        id: deploy_attempt_1
+        uses: azure/webapps-deploy@v3
+        continue-on-error: true
+        with:
+          app-name: 'TaxPilotHRB'
+          slot-name: 'Production'
+          package: .
+
+      - name: 'Wait before retry (attempt 2)'
+        if: steps.deploy_attempt_1.outcome == 'failure'
+        run: sleep 30
+
+      - name: 'Deploy to Azure Web App (attempt 2)'
+        id: deploy_attempt_2
+        if: steps.deploy_attempt_1.outcome == 'failure'
+        uses: azure/webapps-deploy@v3
+        continue-on-error: true
+        with:
+          app-name: 'TaxPilotHRB'
+          slot-name: 'Production'
+          package: .
+
+      - name: 'Wait before retry (attempt 3)'
+        if: steps.deploy_attempt_1.outcome == 'failure' && steps.deploy_attempt_2.outcome == 'failure'
+        run: sleep 60
+
+      - name: 'Deploy to Azure Web App (attempt 3)'
+        id: deploy_attempt_3
+        if: steps.deploy_attempt_1.outcome == 'failure' && steps.deploy_attempt_2.outcome == 'failure'
         uses: azure/webapps-deploy@v3
         with:
           app-name: 'TaxPilotHRB'
