@@ -108,20 +108,16 @@ const WIDGET_RESOURCE_URI_BASE = `${WIDGET_RESOURCE_URI_ROOT}?build=${WIDGET_BUI
 
 /** Store the latest tool result so the widget can render without the postMessage bridge */
 let latestToolResult: Record<string, unknown> | null = formatWelcomeScreen() as unknown as Record<string, unknown>;
-let toolResultVersion = latestToolResult ? 1 : 0;
 
-/** Get the current widget resource URI (versioned so ChatGPT fetches fresh HTML) */
+/** Keep outputTemplate/resource URI stable for ChatGPT tree reconciliation. */
 function getWidgetResourceUri(): string {
-  return toolResultVersion > 0
-    ? `${WIDGET_RESOURCE_URI_BASE}&v=${toolResultVersion}`
-    : WIDGET_RESOURCE_URI_BASE;
+  return WIDGET_RESOURCE_URI_BASE;
 }
 
 /** Wrap a UIResponse into the MCP content block format with structuredContent for Apps SDK. */
 function toMcpContent(uiResp: UIResponse | Record<string, unknown>): { content: Array<{ type: 'text'; text: string }>; structuredContent: Record<string, unknown> } {
   const sc = uiResp as unknown as Record<string, unknown>;
   latestToolResult = sc;
-  toolResultVersion++;
   const readable = toReadableText(sc);
   return {
     content: [{ type: 'text' as const, text: readable }],

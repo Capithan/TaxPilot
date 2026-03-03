@@ -25,18 +25,14 @@ const WIDGET_BUILD_ID = encodeURIComponent(process.env.TAXPILOT_WIDGET_BUILD_ID
 const WIDGET_RESOURCE_URI_BASE = `${WIDGET_RESOURCE_URI_ROOT}?build=${WIDGET_BUILD_ID}`;
 /** Store the latest tool result so the widget can render without the postMessage bridge */
 let latestToolResult = formatWelcomeScreen();
-let toolResultVersion = latestToolResult ? 1 : 0;
-/** Get the current widget resource URI (versioned so ChatGPT fetches fresh HTML) */
+/** Keep outputTemplate/resource URI stable for ChatGPT tree reconciliation. */
 function getWidgetResourceUri() {
-    return toolResultVersion > 0
-        ? `${WIDGET_RESOURCE_URI_BASE}&v=${toolResultVersion}`
-        : WIDGET_RESOURCE_URI_BASE;
+    return WIDGET_RESOURCE_URI_BASE;
 }
 /** Wrap a UIResponse into the MCP content block format with structuredContent for Apps SDK. */
 function toMcpContent(uiResp) {
     const sc = uiResp;
     latestToolResult = sc;
-    toolResultVersion++;
     const readable = toReadableText(sc);
     return {
         content: [{ type: 'text', text: readable }],
