@@ -66,6 +66,7 @@ import {
   formatNotificationSent,
 } from '../ui/formatters/reminders.js';
 import { formatWelcomeScreen } from '../ui/formatters/welcome.js';
+import { findNearbyOffices, getOffice } from '../services/offices.js';
 import type { UIResponse } from '../ui/types.js';
 import { toReadableText } from '../ui/toReadableText.js';
 import { toHtmlWidget } from '../ui/toHtmlWidget.js';
@@ -615,6 +616,7 @@ const mcpTools = [
   { name: 'confirm_intake_summary',  title: 'Confirm Intake Summary',    description: 'Confirm the client intake summary and advance to document checklist.', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'] }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, _meta: toolMeta('Confirming summary…', 'Summary confirmed') },
   { name: 'get_flow_progress',       title: 'Get Flow Progress',         description: 'Get the current flow progress and next available action.', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } } }, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }, _meta: toolMeta('Loading progress…', 'Progress loaded') },
   { name: 'get_conversation_flow',   title: 'Get Conversation Flow',     description: 'Get current conversation flow state and resume from where the user left off.', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } } }, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }, _meta: toolMeta('Loading flow…', 'Flow loaded') },
+  { name: 'find_nearby_offices',      title: 'Find Nearby Offices',        description: 'Find H&R Block tax offices near the user. Call this when a user asks about offices, locations, or branches near them.', inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'Optional city, zip code, or location keyword to filter offices' }, clientId: { type: 'string', description: 'Optional client ID to associate office selection' } } }, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }, _meta: toolMeta('Finding offices nearby…', 'Offices found') },
 ];
 
 // Handle MCP tool calls — returns structured UIResponse via formatters + structuredContent for MCP Apps widget
@@ -974,6 +976,63 @@ function handleToolCall(name: string, args: Record<string, unknown>): { content:
           _meta: { toolName: name, timestamp: new Date().toISOString() },
         };
         return { content: [{ type: 'text', text: flowMessage }], structuredContent: flowUI };
+      }
+
+      case 'find_nearby_offices': {
+        const officeQuery = args.query as string | undefined;
+        const officeClientId = args.clientId as string | undefined;
+        const offices = findNearbyOffices(officeQuery);
+
+        // Build office card components
+        const officeCards = offices.map(office => ({
+          type: 'office_card',
+          id: office.id,
+          name: office.name,
+          address: `${office.address}`,
+          cityState: `${office.city}, ${office.state}`,
+          phone: office.phone,
+          hours: `open today ${office.hours}`,
+          distanceMi: office.distanceMi,
+          nextAvailable: office.nextAvailable,
+          lat: office.lat,
+          lng: office.lng,
+          services: office.services,
+          action: {
+            type: 'tool_call',
+            tool: 'show_booking_form',
+            toolName: 'show_booking_form',
+            parameters: { clientId: officeClientId || '', officeId: office.id },
+          },
+        }));
+
+        // Compute map center (average of all office coords)
+        const avgLat = offices.reduce((s, o) => s + o.lat, 0) / offices.length;
+        const avgLng = offices.reduce((s, o) => s + o.lng, 0) / offices.length;
+
+        const officeUI: Record<string, unknown> = {
+          id: `offices-${Date.now()}`,
+          screen: 'office_locator',
+          components: [
+            { type: 'text_block', text: 'Choose an office', style: 'heading' },
+            {
+              type: 'office_locator',
+              mapCenter: { lat: avgLat, lng: avgLng },
+              mapZoom: 12,
+              offices: officeCards,
+            },
+          ],
+          stateUpdates: { screen: 'office_locator' },
+          data: {
+            clientId: officeClientId,
+            officeCount: offices.length,
+            offices: offices.map(o => ({ id: o.id, name: o.name, distance: `${o.distanceMi} mi`, phone: o.phone })),
+          },
+          _meta: { toolName: name, timestamp: new Date().toISOString(), nextSuggestedTools: ['show_booking_form'] },
+        };
+        return {
+          content: [{ type: 'text', text: `Found ${offices.length} H&R Block offices nearby. The closest is ${offices[0]?.name} at ${offices[0]?.distanceMi} mi.` }],
+          structuredContent: officeUI,
+        };
       }
 
       default:

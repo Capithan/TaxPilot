@@ -171,6 +171,7 @@ class TaxPilotRenderer {
       case 'divider':           return this._renderDivider(c);
       case 'text_block':        return this._renderTextBlock(c);
       case 'carousel':          return this._renderCarousel(c);
+      case 'office_locator':    return this._renderOfficeLocator(c);
       case 'accordion':         return this._renderAccordion(c);
       case 'tooltip':           return this._renderTooltip(c);
       case 'notification':      return this._renderNotification(c);
@@ -732,6 +733,49 @@ class TaxPilotRenderer {
       <div class="tp-carousel-track" id="${cid}">${items}</div>
       <button class="tp-carousel-nav tp-carousel-next">&rsaquo;</button>
     </div>`;
+  }
+
+  // ─── Office Locator (Map + Cards) ──────────────────────────
+  _renderOfficeLocator(c) {
+    const offices = c.offices || [];
+    const center = c.mapCenter || { lat: 31.83, lng: -106.43 };
+    const osmSrc = `https://www.openstreetmap.org/export/embed.html?bbox=${center.lng-0.06},${center.lat-0.04},${center.lng+0.06},${center.lat+0.04}&layer=mapnik`;
+
+    const officeCards = offices.map((o) => {
+      const cardId = this._uid('ofc');
+      this._pendingBinds.push(el => {
+        const card = el.querySelector(`#${cardId}`);
+        if (card && o.action) {
+          card.addEventListener('click', () => {
+            el.querySelectorAll('.tp-office-card').forEach(c => c.classList.remove('tp-office-card--selected'));
+            card.classList.add('tp-office-card--selected');
+            this._handleToolAction(o.action);
+          });
+        }
+      });
+      return `
+        <div id="${cardId}" class="tp-office-card" role="button" tabindex="0">
+          <div class="tp-office-header">
+            <div class="tp-office-name">${esc(o.name)}</div>
+            <div class="tp-office-distance">${o.distanceMi} mi <span class="tp-chevron">&rsaquo;</span></div>
+          </div>
+          <div class="tp-office-address">${esc(o.cityState || '')}</div>
+          <div class="tp-office-phone">${esc(o.phone || '')}</div>
+          <div class="tp-office-hours">${esc(o.hours || '')}</div>
+          <div class="tp-office-avail">
+            <span class="tp-office-avail-dot"></span>
+            Next available appointment on ${esc(o.nextAvailable || '')}
+          </div>
+        </div>`;
+    }).join('');
+
+    return `
+      <div class="tp-office-locator">
+        <div class="tp-office-map">
+          <iframe src="${osmSrc}" loading="lazy" referrerpolicy="no-referrer" title="Office map"></iframe>
+        </div>
+        <div class="tp-office-list">${officeCards}</div>
+      </div>`;
   }
 
   // ─── Accordion (BDS hrb-accordion pattern) ─────────────────

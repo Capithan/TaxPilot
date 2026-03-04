@@ -370,6 +370,73 @@ body {
   .tp-btn { min-height: 44px; }
   .tp-mopt, .tp-sopt { min-height: 44px; }
 }
+
+/* ── Office Locator ─────────────────────────────────────────────────────── */
+.tp-office-locator {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin: 8px 0;
+}
+@media (max-width: 600px) {
+  .tp-office-locator { grid-template-columns: 1fr; }
+}
+.tp-office-map {
+  border-radius: var(--hrb-radius);
+  overflow: hidden;
+  min-height: 350px;
+  background: #e8e8e8;
+  position: relative;
+}
+.tp-office-map iframe {
+  width: 100%; height: 100%; min-height: 350px; border: none;
+}
+.tp-office-list {
+  display: flex; flex-direction: column; gap: 12px;
+  max-height: 420px; overflow-y: auto;
+  padding-right: 4px;
+}
+.tp-office-list::-webkit-scrollbar { width: 4px; }
+.tp-office-list::-webkit-scrollbar-thumb { background: var(--hrb-border); border-radius: 2px; }
+.tp-office-card {
+  border: 1px solid var(--hrb-border);
+  border-radius: var(--hrb-radius);
+  padding: 16px;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  background: var(--hrb-white);
+}
+.tp-office-card:hover {
+  border-color: var(--hrb-green);
+  box-shadow: 0 2px 8px rgba(0,102,51,0.12);
+}
+.tp-office-card--selected {
+  border-color: var(--hrb-green);
+  box-shadow: 0 0 0 2px rgba(0,102,51,0.18);
+}
+.tp-office-header {
+  display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;
+}
+.tp-office-name {
+  font-weight: 700; font-size: 14px; color: var(--hrb-text);
+}
+.tp-office-distance {
+  font-size: 13px; color: var(--hrb-text-muted); white-space: nowrap;
+  display: flex; align-items: center; gap: 4px;
+}
+.tp-office-distance .tp-chevron { font-size: 14px; color: var(--hrb-text-muted); }
+.tp-office-address { font-size: 13px; color: var(--hrb-text-light); margin-bottom: 4px; }
+.tp-office-phone {
+  font-size: 13px; font-weight: 600; color: var(--hrb-green); margin-bottom: 4px;
+}
+.tp-office-hours { font-size: 13px; color: var(--hrb-text-light); margin-bottom: 6px; }
+.tp-office-avail {
+  font-size: 12px; color: var(--hrb-text-muted);
+  display: flex; align-items: center; gap: 6px;
+}
+.tp-office-avail-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: #F9A825; display: inline-block;
+}
 </style>
 </head>
 <body>
@@ -684,6 +751,7 @@ class WidgetRenderer {
       case 'Divider':            case 'divider':                   return this._renderDivider(c);
       case 'TextBlock':          case 'text_block':                return this._renderTextBlock(c);
       case 'Carousel':           case 'carousel':                  return this._renderCarousel(c);
+      case 'OfficeLocator':        case 'office_locator':            return this._renderOfficeLocator(c);
       default: return `<!-- unknown: ${key} -->`;
     }
   }
@@ -1087,6 +1155,52 @@ class WidgetRenderer {
       if (next) next.addEventListener('click', () => track.scrollBy({ left: 300, behavior: 'smooth' }));
     });
     return `<div class="tp-carousel"><button class="tp-carousel-nav tp-carousel-prev">&lsaquo;</button><div class="tp-carousel-track" id="${cid}">${items}</div><button class="tp-carousel-nav tp-carousel-next">&rsaquo;</button></div>`;
+  }
+
+  // ─── Office Locator (Map + Cards) ──────────────────────────────
+  _renderOfficeLocator(c) {
+    const offices = c.offices || [];
+    const center = c.mapCenter || { lat: 31.83, lng: -106.43 };
+    const zoom = c.mapZoom || 12;
+
+    // OpenStreetMap embed (free, no API key needed)
+    const osmSrc = `https://www.openstreetmap.org/export/embed.html?bbox=${center.lng-0.06},${center.lat-0.04},${center.lng+0.06},${center.lat+0.04}&layer=mapnik`;
+
+    const officeCards = offices.map((o) => {
+      const cardId = this._uid('ofc');
+      this._bindings.push(el => {
+        const card = el.querySelector(`#${cardId}`);
+        if (card && o.action) {
+          card.addEventListener('click', () => {
+            el.querySelectorAll('.tp-office-card').forEach(c => c.classList.remove('tp-office-card--selected'));
+            card.classList.add('tp-office-card--selected');
+            this._handleAction(o.action);
+          });
+        }
+      });
+      return `
+        <div id="${cardId}" class="tp-office-card" role="button" tabindex="0">
+          <div class="tp-office-header">
+            <div class="tp-office-name">${esc(o.name)}</div>
+            <div class="tp-office-distance">${o.distanceMi} mi <span class="tp-chevron">&rsaquo;</span></div>
+          </div>
+          <div class="tp-office-address">${esc(o.cityState)}</div>
+          <div class="tp-office-phone">${esc(o.phone)}</div>
+          <div class="tp-office-hours">${esc(o.hours)}</div>
+          <div class="tp-office-avail">
+            <span class="tp-office-avail-dot"></span>
+            Next available appointment on ${esc(o.nextAvailable)}
+          </div>
+        </div>`;
+    }).join('');
+
+    return `
+      <div class="tp-office-locator">
+        <div class="tp-office-map">
+          <iframe src="${osmSrc}" loading="lazy" referrerpolicy="no-referrer" title="Office map"></iframe>
+        </div>
+        <div class="tp-office-list">${officeCards}</div>
+      </div>`;
   }
 
   // ─── Action handler ────────────────────────────────────────────

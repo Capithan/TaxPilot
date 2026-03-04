@@ -28,6 +28,7 @@ const TYPE_TO_SCREEN: Record<string, string> = {
   appointment_estimate: 'appointment_booking',
   appointment_booking: 'appointment_booking',
   appointment_created: 'confirmation',
+  office_locator: 'office_locator',
   flow_status: 'home',
   flow_advanced: 'home',
   flow_progress: 'home',
