@@ -739,22 +739,34 @@ class TaxPilotRenderer {
   _renderOfficeLocator(c) {
     const offices = c.offices || [];
     const center = c.mapCenter || { lat: 31.83, lng: -106.43 };
-    const osmSrc = `https://www.openstreetmap.org/export/embed.html?bbox=${center.lng-0.06},${center.lat-0.04},${center.lng+0.06},${center.lat+0.04}&layer=mapnik`;
+    const zoom = c.mapZoom || 12;
+    const mapId = this._uid('map');
 
-    const officeCards = offices.map((o) => {
+    const officeCards = offices.map((o, idx) => {
       const cardId = this._uid('ofc');
+      o._cardId = cardId;
+      o._idx = idx;
       this._pendingBinds.push(el => {
         const card = el.querySelector(`#${cardId}`);
         if (card && o.action) {
           card.addEventListener('click', () => {
-            el.querySelectorAll('.tp-office-card').forEach(c => c.classList.remove('tp-office-card--selected'));
+            el.querySelectorAll('.tp-office-card').forEach(c => {
+              c.classList.remove('tp-office-card--selected');
+              c.classList.remove('tp-office-card--highlighted');
+            });
             card.classList.add('tp-office-card--selected');
+            // Pan map to this office pin
+            if (window._tpOfficeMarkers && window._tpOfficeMarkers[idx]) {
+              const m = window._tpOfficeMarkers[idx];
+              if (window._tpOfficeMap) window._tpOfficeMap.setView(m.getLatLng(), 14, { animate: true });
+              m.openPopup();
+            }
             this._handleToolAction(o.action);
           });
         }
       });
       return `
-        <div id="${cardId}" class="tp-office-card" role="button" tabindex="0">
+        <div id="${cardId}" class="tp-office-card" role="button" tabindex="0" data-office-idx="${idx}">
           <div class="tp-office-header">
             <div class="tp-office-name">${esc(o.name)}</div>
             <div class="tp-office-distance">${o.distanceMi} mi <span class="tp-chevron">&rsaquo;</span></div>
@@ -769,10 +781,77 @@ class TaxPilotRenderer {
         </div>`;
     }).join('');
 
+    // Leaflet map initialization binding
+    this._pendingBinds.push(el => {
+      const mapEl = el.querySelector(`#${mapId}`);
+      if (!mapEl) return;
+
+      const initMap = () => {
+        const map = L.map(mapEl, { scrollWheelZoom: true, zoomControl: true }).setView([center.lat, center.lng], zoom);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+          maxZoom: 19,
+        }).addTo(map);
+
+        window._tpOfficeMap = map;
+        window._tpOfficeMarkers = [];
+
+        const pinSvg = (label) => `<div class="tp-office-pin">
+          <svg width="30" height="40" viewBox="0 0 30 40">
+            <path d="M15 0C6.7 0 0 6.7 0 15c0 11.25 15 25 15 25s15-13.75 15-25C30 6.7 23.3 0 15 0z" fill="#006633"/>
+            <circle cx="15" cy="14" r="8" fill="#fff" opacity="0.9"/>
+          </svg>
+          <span class="tp-office-pin-label">${label}</span>
+        </div>`;
+
+        offices.forEach((o, idx) => {
+          if (!o.lat || !o.lng) return;
+          const icon = L.divIcon({ className: 'tp-office-pin-wrapper', html: pinSvg(idx + 1), iconSize: [30, 40], iconAnchor: [15, 40], popupAnchor: [0, -36] });
+          const marker = L.marker([o.lat, o.lng], { icon }).addTo(map);
+          marker.bindPopup(`<strong>${o.name || ''}</strong><br>${o.cityState || ''}<br>${o.phone || ''}`, { closeButton: false, className: 'tp-office-popup' });
+          marker.on('click', () => {
+            const root = el;
+            root.querySelectorAll('.tp-office-card').forEach(c => {
+              c.classList.remove('tp-office-card--highlighted');
+              c.classList.remove('tp-office-card--selected');
+            });
+            const card = root.querySelector(`[data-office-idx="${idx}"]`);
+            if (card) {
+              card.classList.add('tp-office-card--highlighted');
+              card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+          });
+          window._tpOfficeMarkers.push(marker);
+        });
+
+        if (window._tpOfficeMarkers.length > 1) {
+          const group = L.featureGroup(window._tpOfficeMarkers);
+          map.fitBounds(group.getBounds().pad(0.15));
+        }
+
+        setTimeout(() => map.invalidateSize(), 200);
+      };
+
+      if (typeof L !== 'undefined' && L.map) {
+        initMap();
+      } else {
+        if (!document.querySelector('link[href*="leaflet"]')) {
+          const link = document.createElement('link');
+          link.rel = 'stylesheet';
+          link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+          document.head.appendChild(link);
+        }
+        const script = document.createElement('script');
+        script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+        script.onload = initMap;
+        document.head.appendChild(script);
+      }
+    });
+
     return `
       <div class="tp-office-locator">
         <div class="tp-office-map">
-          <iframe src="${osmSrc}" loading="lazy" referrerpolicy="no-referrer" title="Office map"></iframe>
+          <div id="${mapId}" style="width:100%;height:100%;min-height:350px;"></div>
         </div>
         <div class="tp-office-list">${officeCards}</div>
       </div>`;
