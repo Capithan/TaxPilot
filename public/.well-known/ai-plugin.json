@@ -9,9 +9,9 @@
   },
   "api": {
     "type": "openapi",
-    "url": "https://taxpilot-e9ewftfzehcvdmbf.centralus-01.azurewebsites.net/openapi.yaml"
+    "url": "https://taxpilothrb-htbuh3fka8a8hrde.centralus-01.azurewebsites.net/openapi.yaml"
   },
-  "logo_url": "https://taxpilot-e9ewftfzehcvdmbf.centralus-01.azurewebsites.net/logo.png",
+  "logo_url": "https://taxpilothrb-htbuh3fka8a8hrde.centralus-01.azurewebsites.net/logo.png",
   "contact_email": "support@example.com",
-  "legal_info_url": "https://taxpilot-e9ewftfzehcvdmbf.centralus-01.azurewebsites.net/privacy"
+  "legal_info_url": "https://taxpilothrb-htbuh3fka8a8hrde.centralus-01.azurewebsites.net/privacy"
 }

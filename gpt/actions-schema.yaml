@@ -11,7 +11,7 @@ info:
     Use `_ui.title` and `_ui.subtitle` as section headers.
   version: 2.0.0
 servers:
-  - url: https://taxpilot-e9ewftfzehcvdmbf.centralus-01.azurewebsites.net
+  - url: https://taxpilothrb-htbuh3fka8a8hrde.centralus-01.azurewebsites.net
 
 paths:
   /intake/start:

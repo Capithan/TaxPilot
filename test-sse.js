@@ -3,7 +3,7 @@ import https from 'https';
 console.log('Connecting to SSE...');
 
 let chunks = 0;
-const req = https.get('https://taxpilot-e9ewftfzehcvdmbf.centralus-01.azurewebsites.net/sse', {
+const req = https.get('https://taxpilothrb-htbuh3fka8a8hrde.centralus-01.azurewebsites.net/sse', {
   headers: { 'Accept': 'text/event-stream' }
 }, (res) => {
   console.log('Status:', res.statusCode);
