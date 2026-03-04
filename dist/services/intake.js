@@ -1,4 +1,5 @@
 import { db } from '../database/index.js';
+import { calculateComplexityScore } from './routing.js';
 // Intake step order
 const INTAKE_STEPS = [
     'personal_info',
@@ -353,6 +354,8 @@ export function processIntakeResponse(sessionId, answer) {
     session.responses.push(response);
     // Process the response and update client profile
     updateClientFromResponse(client, session.currentStep, safeAnswer);
+    // Recalculate complexity score after every response so the review screen shows the latest value
+    client.complexityScore = calculateComplexityScore(client);
     // Check if current step is complete
     const stepQuestions = INTAKE_QUESTIONS[session.currentStep];
     const stepResponses = session.responses.filter((r) => r.step === session.currentStep);
