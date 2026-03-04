@@ -663,7 +663,7 @@ export function formatClientSummary(
     },
     {
       type: 'button', label: '✏️ I Need to Make Changes', variant: 'secondary', icon: '✏️',
-      action: toolCallAction('process_intake_response', { sessionId: '' }),
+      action: toolCallAction('start_intake'),
     },
   );
 
