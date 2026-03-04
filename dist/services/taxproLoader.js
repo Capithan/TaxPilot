@@ -39,6 +39,25 @@ function parseCSV(content) {
     }
     return rows;
 }
+function readFirstExistingFile(possiblePaths) {
+    for (const tryPath of possiblePaths) {
+        try {
+            if (fs.existsSync(tryPath)) {
+                return { content: fs.readFileSync(tryPath, 'utf-8'), usedPath: tryPath };
+            }
+        }
+        catch {
+            // Continue to next path
+        }
+    }
+    return null;
+}
+function parseTaxProJson(content) {
+    const parsed = JSON.parse(content);
+    if (!Array.isArray(parsed))
+        return [];
+    return parsed;
+}
 /**
  * Map CSV specializations to internal Specialization type
  */
@@ -54,7 +73,9 @@ function mapSpecializations(csvSpecs) {
         'estate planning': 'estate_planning',
         'audit representation': 'audit_representation',
     };
-    const specs = csvSpecs.split(',').map(s => s.trim().toLowerCase());
+    const specs = (Array.isArray(csvSpecs) ? csvSpecs : csvSpecs.split(','))
+        .map(s => s.trim().toLowerCase())
+        .filter(Boolean);
     const mapped = [];
     for (const spec of specs) {
         const mapped_spec = specMap[spec];
@@ -94,11 +115,58 @@ function determineMaxComplexity(minLevel, maxLevel) {
     return 'simple';
 }
 /**
- * Load tax professionals from CSV file
- * @param csvPath - Optional path to CSV file. Defaults to Dummy_data_taxpro.csv in project root
+ * Load tax professionals from JSON file
+ * @param jsonPath - Optional path to JSON file. Defaults to Dummy_data_taxpro.json in project root
+ */
+export function loadTaxProsFromJSON(jsonPath) {
+    const possiblePaths = [
+        jsonPath,
+        path.join(process.cwd(), 'Dummy_data_taxpro.json'),
+        path.join(process.cwd(), 'data', 'Dummy_data_taxpro.json'),
+        path.join(__dirname, '..', '..', 'Dummy_data_taxpro.json'),
+        path.join(__dirname, '..', '..', '..', 'Dummy_data_taxpro.json'),
+    ].filter(Boolean);
+    const found = readFirstExistingFile(possiblePaths);
+    if (!found) {
+        console.warn('Tax pros JSON file not found, falling back to CSV. Searched:', possiblePaths);
+        return loadTaxProsFromCSV();
+    }
+    console.log(`Loading tax professionals from: ${found.usedPath}`);
+    let rows = [];
+    try {
+        rows = parseTaxProJson(found.content);
+    }
+    catch (err) {
+        console.warn('Failed to parse tax pros JSON, falling back to CSV:', err);
+        return loadTaxProsFromCSV();
+    }
+    const taxPros = [];
+    for (const row of rows) {
+        if (!row?.is_active)
+            continue;
+        const minComplexity = Number(row.complexity_level_min ?? 0);
+        const maxComplexity = Number(row.complexity_level_max ?? 100);
+        const appointmentsPerDay = Number(row.appointments_per_day ?? 8);
+        taxPros.push({
+            id: String(row.tax_pro_id),
+            name: `${row.first_name} ${row.last_name}`,
+            email: row.email,
+            specializations: mapSpecializations(row.specializations),
+            maxComplexity: determineMaxComplexity(minComplexity, maxComplexity),
+            currentLoad: 0,
+            maxDailyAppointments: appointmentsPerDay,
+            available: true,
+            rating: Number(row.rating ?? 4.5),
+        });
+    }
+    console.log(`Loaded ${taxPros.length} active tax professionals from JSON`);
+    return taxPros;
+}
+/**
+ * Backward-compatible CSV loader (kept for compatibility and as fallback).
+ * Prefer `loadTaxProsFromJSON`.
  */
 export function loadTaxProsFromCSV(csvPath) {
-    // Try multiple possible locations for the CSV file
     const possiblePaths = [
         csvPath,
         path.join(process.cwd(), 'Dummy_data_taxpro.csv'),
@@ -106,47 +174,31 @@ export function loadTaxProsFromCSV(csvPath) {
         path.join(__dirname, '..', '..', 'Dummy_data_taxpro.csv'),
         path.join(__dirname, '..', '..', '..', 'Dummy_data_taxpro.csv'),
     ].filter(Boolean);
-    let fileContent = null;
-    let usedPath = '';
-    for (const tryPath of possiblePaths) {
-        try {
-            if (fs.existsSync(tryPath)) {
-                fileContent = fs.readFileSync(tryPath, 'utf-8');
-                usedPath = tryPath;
-                break;
-            }
-        }
-        catch (err) {
-            // Continue to next path
-        }
-    }
-    if (!fileContent) {
+    const found = readFirstExistingFile(possiblePaths);
+    if (!found) {
         console.warn('Tax pros CSV file not found, using empty list. Searched:', possiblePaths);
         return [];
     }
-    console.log(`Loading tax professionals from: ${usedPath}`);
-    const rows = parseCSV(fileContent);
+    console.log(`Loading tax professionals from: ${found.usedPath}`);
+    const rows = parseCSV(found.content);
     const taxPros = [];
     for (const row of rows) {
-        // Skip inactive tax pros
-        if (row.is_active?.toUpperCase() !== 'TRUE') {
+        if (row.is_active?.toUpperCase() !== 'TRUE')
             continue;
-        }
         const minComplexity = parseInt(row.complexity_level_min, 10) || 0;
         const maxComplexity = parseInt(row.complexity_level_max, 10) || 100;
         const appointmentsPerDay = parseInt(row.appointments_per_day, 10) || 8;
-        const taxPro = {
+        taxPros.push({
             id: row.tax_pro_id,
             name: `${row.first_name} ${row.last_name}`,
             email: row.email,
             specializations: mapSpecializations(row.specializations),
             maxComplexity: determineMaxComplexity(minComplexity, maxComplexity),
-            currentLoad: 0, // Start with no load
+            currentLoad: 0,
             maxDailyAppointments: appointmentsPerDay,
             available: true,
             rating: parseFloat(row.rating) || 4.5,
-        };
-        taxPros.push(taxPro);
+        });
     }
     console.log(`Loaded ${taxPros.length} active tax professionals from CSV`);
     return taxPros;
@@ -155,27 +207,51 @@ export function loadTaxProsFromCSV(csvPath) {
  * Load extended info for all tax pros (for advanced routing)
  */
 export function loadExtendedTaxProInfo(csvPath) {
-    const possiblePaths = [
+    const infoMap = new Map();
+    // Prefer JSON, fall back to CSV
+    const jsonPaths = [
+        csvPath,
+        path.join(process.cwd(), 'Dummy_data_taxpro.json'),
+        path.join(process.cwd(), 'data', 'Dummy_data_taxpro.json'),
+    ].filter(Boolean);
+    const foundJson = readFirstExistingFile(jsonPaths);
+    if (foundJson) {
+        try {
+            const rows = parseTaxProJson(foundJson.content);
+            for (const row of rows) {
+                if (!row?.is_active)
+                    continue;
+                const rawSpecs = Array.isArray(row.specializations)
+                    ? row.specializations
+                    : String(row.specializations ?? '').split(',');
+                infoMap.set(String(row.tax_pro_id), {
+                    id: String(row.tax_pro_id),
+                    firstName: row.first_name,
+                    lastName: row.last_name,
+                    phone: row.phone,
+                    yearsExperience: Number(row.years_experience ?? 0),
+                    complexityRange: {
+                        min: Number(row.complexity_level_min ?? 0),
+                        max: Number(row.complexity_level_max ?? 100),
+                    },
+                    rawSpecializations: rawSpecs.map(s => String(s).trim()).filter(Boolean),
+                });
+            }
+            return infoMap;
+        }
+        catch {
+            // If JSON parse fails, continue to CSV fallback
+        }
+    }
+    const csvPaths = [
         csvPath,
         path.join(process.cwd(), 'Dummy_data_taxpro.csv'),
         path.join(process.cwd(), 'data', 'Dummy_data_taxpro.csv'),
     ].filter(Boolean);
-    let fileContent = null;
-    for (const tryPath of possiblePaths) {
-        try {
-            if (fs.existsSync(tryPath)) {
-                fileContent = fs.readFileSync(tryPath, 'utf-8');
-                break;
-            }
-        }
-        catch (err) {
-            // Continue to next path
-        }
-    }
-    const infoMap = new Map();
-    if (!fileContent)
+    const foundCsv = readFirstExistingFile(csvPaths);
+    if (!foundCsv)
         return infoMap;
-    const rows = parseCSV(fileContent);
+    const rows = parseCSV(foundCsv.content);
     for (const row of rows) {
         if (row.is_active?.toUpperCase() !== 'TRUE')
             continue;

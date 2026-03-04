@@ -1,4 +1,4 @@
-import { loadTaxProsFromCSV } from '../services/taxproLoader.js';
+import { loadTaxProsFromJSON } from '../services/taxproLoader.js';
 // In-memory database for demo purposes
 // In production, replace with actual database (PostgreSQL, MongoDB, etc.)
 class Database {
@@ -12,8 +12,8 @@ class Database {
         this.initializeTaxPros();
     }
     initializeTaxPros() {
-        // Load tax professionals from CSV file
-        const taxPros = loadTaxProsFromCSV();
+        // Load tax professionals from JSON file (falls back to CSV if JSON not found)
+        const taxPros = loadTaxProsFromJSON();
         if (taxPros.length > 0) {
             taxPros.forEach((tp) => this.taxPros.set(tp.id, tp));
         }

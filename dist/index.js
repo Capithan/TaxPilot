@@ -18,10 +18,8 @@ import { formatWelcomeScreen } from './ui/formatters/welcome.js';
 import { getAppWidgetHtml, APP_WIDGET_MIME_TYPE } from './ui/appWidgetHtml.js';
 /** MCP Apps Widget resource URI */
 const WIDGET_RESOURCE_URI_ROOT = 'ui://taxpilot/widget.html';
-const WIDGET_BUILD_ID = encodeURIComponent(process.env.TAXPILOT_WIDGET_BUILD_ID
-    || process.env.WEBSITE_INSTANCE_ID
-    || Date.now().toString(36));
-const WIDGET_RESOURCE_URI_BASE = `${WIDGET_RESOURCE_URI_ROOT}?build=${WIDGET_BUILD_ID}`;
+// Use a stable resource URI - dynamic build IDs cause cache misses in ChatGPT
+const WIDGET_RESOURCE_URI_BASE = WIDGET_RESOURCE_URI_ROOT;
 /** Store the latest tool result so the widget can render without the postMessage bridge */
 let latestToolResult = formatWelcomeScreen();
 /** Keep resource URI stable for ChatGPT tree reconciliation. */
@@ -29,17 +27,28 @@ function getWidgetResourceUri() {
     return WIDGET_RESOURCE_URI_BASE;
 }
 /**
+ * External CDN domains used by TaxPilot widgets.
+ * These are required for fonts, images, and other external assets.
+ */
+const EXTERNAL_RESOURCE_DOMAINS = [
+    'https://cdn.openai.com', // Fonts from @openai/apps-sdk-ui
+    'https://images.unsplash.com', // Sample images
+    'https://persistent.oaistatic.com', // ChatGPT assets
+];
+const EXTERNAL_CONNECT_DOMAINS = [
+// Add any API endpoints the widget needs to call
+];
+/**
  * CSP domains for the MCP Apps sandbox.
  * Per sebderhy/mcp-app-template _base.py get_csp_domains().
- * Our widget is fully self-contained (inline JS/CSS) so we use
- * the deployment URL as the only resource/connect domain.
+ * Always includes a default localhost origin for local development.
  */
 function getCspDomains() {
     const origin = process.env.WEBSITE_HOSTNAME
         ? `https://${process.env.WEBSITE_HOSTNAME}`
-        : process.env.BASE_URL || '';
-    const resourceDomains = origin ? [origin] : [];
-    const connectDomains = origin ? [origin] : [];
+        : process.env.BASE_URL || 'http://localhost:8080';
+    const resourceDomains = [origin, ...EXTERNAL_RESOURCE_DOMAINS];
+    const connectDomains = [origin, ...EXTERNAL_CONNECT_DOMAINS];
     return { resourceDomains, connectDomains };
 }
 /**
@@ -525,66 +534,18 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
         },
     ];
-    // Inject MCP Apps UI metadata into tools.
-    //
-    // Following the OpenAI "decoupled pattern" recommendation:
-    //   - Model-facing / render tools get openai/outputTemplate so ChatGPT
-    //     renders the widget when the *model* triggers them.
-    //   - Widget-interactive tools (called from inside the widget via
-    //     window.openai.callTool) do NOT get outputTemplate. The widget
-    //     handles re-rendering internally from the structuredContent.
-    //     Attaching outputTemplate to these tools causes ChatGPT's tree
-    //     reconciler to also try to update the widget externally, producing
-    //     the "Cannot moveNode" error.
-    //
-    // See: https://developers.openai.com/apps-sdk/build/chatgpt-ui/#decoupled-pattern
-    const MODEL_RENDER_TOOLS = new Set([
-        'render_welcome_ui',
-        'start_intake',
-        'get_client_summary',
-        'generate_document_checklist',
-        'get_document_checklist',
-        'get_pending_documents',
-        'get_intake_progress',
-        'list_tax_professionals',
-        'calculate_complexity',
-        'route_to_tax_pro',
-        'get_tax_pro_recommendations',
-        'create_appointment',
-        'get_appointment_estimate',
-        'get_conversation_flow',
-        'get_flow_progress',
-    ]);
-    // Following the sebderhy/mcp-app-template pattern:
-    //   - Model-render tools: _meta with ui.resourceUri + csp (host renders widget)
-    //   - Widget-interactive tools: registered but NO _meta.ui
-    //     They're called via window.openai.callTool from within the widget.
-    //     Their RESULTS still include _meta (via toMcpContent) so the host
-    //     knows to update the widget's toolOutput.
-    const tools = rawTools.map(tool => {
-        const isRenderTool = MODEL_RENDER_TOOLS.has(tool.name);
-        if (isRenderTool) {
-            return {
-                ...tool,
-                _meta: getToolMeta(),
-                annotations: {
-                    destructiveHint: false,
-                    openWorldHint: false,
-                    readOnlyHint: true,
-                },
-            };
-        }
-        // Widget-interactive / data-only tools — no _meta.ui in definition
-        // but their results include _meta via toMcpContent
-        return {
-            ...tool,
-            annotations: {
-                destructiveHint: false,
-                openWorldHint: false,
-                readOnlyHint: true,
-            },
-        };
-    });
+    // Per sebderhy/mcp-app-template: ALL tools get _meta.ui so the host knows
+    // which widget to associate with each tool. The resourceUri links the tool
+    // to its UI resource.
+    const tools = rawTools.map(tool => ({
+        ...tool,
+        _meta: getToolMeta(),
+        annotations: {
+            destructiveHint: false,
+            openWorldHint: false,
+            readOnlyHint: true,
+        },
+    }));
     return { tools };
 });
 // Handle resource listing (MCP Apps widget)

@@ -1,7 +1,12 @@
 import { TaxProfessional } from '../types/index.js';
 /**
- * Load tax professionals from CSV file
- * @param csvPath - Optional path to CSV file. Defaults to Dummy_data_taxpro.csv in project root
+ * Load tax professionals from JSON file
+ * @param jsonPath - Optional path to JSON file. Defaults to Dummy_data_taxpro.json in project root
+ */
+export declare function loadTaxProsFromJSON(jsonPath?: string): TaxProfessional[];
+/**
+ * Backward-compatible CSV loader (kept for compatibility and as fallback).
+ * Prefer `loadTaxProsFromJSON`.
  */
 export declare function loadTaxProsFromCSV(csvPath?: string): TaxProfessional[];
 /**
