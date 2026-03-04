@@ -5,6 +5,32 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+function getRequestBaseUrl(req: Request): string {
+  const forwardedProto = (req.headers['x-forwarded-proto'] as string | undefined)?.split(',')[0]?.trim();
+  const proto = forwardedProto || req.protocol;
+  const forwardedHost = (req.headers['x-forwarded-host'] as string | undefined)?.split(',')[0]?.trim();
+  const host = forwardedHost || req.get('host');
+  return `${proto}://${host}`;
+}
+
+function buildPluginManifest(baseUrl: string): Record<string, unknown> {
+  return {
+    schema_version: 'v1',
+    name_for_human: 'Tax Intake Assistant',
+    name_for_model: 'tax_intake',
+    description_for_human: 'Streamline your tax appointment preparation with intelligent intake, document checklists, and smart scheduling.',
+    description_for_model: "Help users prepare for tax appointments. Use this plugin to: 1) Start and manage tax intake sessions to collect client information, 2) Generate personalized document checklists based on their tax situation, 3) Track which documents have been collected, 4) Create reminders for pending documents, 5) Route clients to the appropriate tax professional based on complexity, 6) Estimate appointment duration. Always start with 'startIntake' for new clients, then use 'processIntakeResponse' to collect answers step by step.",
+    auth: { type: 'none' },
+    api: {
+      type: 'openapi',
+      url: `${baseUrl}/openapi.yaml`,
+    },
+    logo_url: `${baseUrl}/logo.png`,
+    contact_email: 'support@example.com',
+    legal_info_url: `${baseUrl}/privacy`,
+  };
+}
+
 // Get __dirname in ESM
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -64,14 +90,19 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // ChatGPT Plugin manifest
-app.get('/.well-known/ai-plugin.json', (_req, res) => {
+app.get('/.well-known/ai-plugin.json', (req, res) => {
   try {
     const publicDir = path.join(__dirname, '..', 'public');
     const manifestPath = path.join(publicDir, '.well-known', 'ai-plugin.json');
-    const manifest = fs.readFileSync(manifestPath, 'utf-8');
-    res.type('application/json').send(manifest);
+    if (fs.existsSync(manifestPath)) {
+      const manifest = fs.readFileSync(manifestPath, 'utf-8');
+      res.type('application/json').send(manifest);
+      return;
+    }
+
+    res.json(buildPluginManifest(getRequestBaseUrl(req)));
   } catch (e) {
-    res.status(404).json({ error: 'Plugin manifest not found' });
+    res.json(buildPluginManifest(getRequestBaseUrl(req)));
   }
 });
 
