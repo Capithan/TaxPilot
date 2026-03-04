@@ -911,7 +911,7 @@ class WidgetRenderer {
           if (c.action) {
             const action = { ...c.action };
             if (action.type === 'tool_call') {
-              action.toolArgs = { ...(action.toolArgs || {}), selection: opt.id };
+              action.toolArgs = { ...(action.toolArgs || action.parameters || {}), selection: opt.id };
             } else if (action.type === 'send_message') {
               action.message = opt.label;
             }
@@ -1072,8 +1072,9 @@ class WidgetRenderer {
         // Support both field name schemas:
         //   toolName / toolArgs  — component types (FormGroupComponent.submitAction)
         //   tool     / parameters — intake formatter (toolCallAction helper)
+        // Always merge both sources so parameters (sessionId, step, etc.) are never lost.
         const toolName = action.toolName || action.tool;
-        const toolArgs = action.toolArgs || action.parameters || {};
+        const toolArgs = { ...(action.parameters || {}), ...(action.toolArgs || {}) };
         if (!toolName) return;
 
         // Use a real DOM element so we can reliably remove it in every code path
