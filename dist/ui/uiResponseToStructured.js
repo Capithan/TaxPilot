@@ -23,6 +23,7 @@ const TYPE_TO_SCREEN = {
     routing_result: 'taxpro_matching',
     tax_pro_recommendations: 'taxpro_matching',
     appointment_estimate: 'appointment_booking',
+    appointment_booking: 'appointment_booking',
     appointment_created: 'confirmation',
     flow_status: 'home',
     flow_advanced: 'home',

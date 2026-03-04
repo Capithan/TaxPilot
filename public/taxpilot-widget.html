@@ -739,19 +739,34 @@ class WidgetRenderer {
         const dayOpts = Array.from({ length: 31 }, (_, i) =>
           `<option value="${String(i + 1).padStart(2, '0')}">${i + 1}</option>`).join('');
         const curYear = new Date().getFullYear();
-        const yearOpts = Array.from({ length: 101 }, (_, i) => curYear - 16 - i)
-          .map(y => `<option value="${y}">${y}</option>`).join('');
+        // Support future dates (appointments) vs past dates (birth dates)
+        const isFuture = c.dateRange === 'future';
+        let yearOptsList;
+        if (isFuture) {
+          yearOptsList = Array.from({ length: 5 }, (_, i) => curYear + i);
+        } else {
+          yearOptsList = Array.from({ length: 101 }, (_, i) => curYear - 16 - i);
+        }
+        const yearOpts = yearOptsList.map(y => `<option value="${y}">${y}</option>`).join('');
+
+        // Parse defaultValue (YYYY-MM-DD) to pre-select dropdowns
+        let defMon = '', defDay = '', defYr = '';
+        if (c.defaultValue) {
+          const parts = String(c.defaultValue).split('-');
+          if (parts.length === 3) { defYr = parts[0]; defMon = parts[1]; defDay = parts[2]; }
+        }
+
         input =
           `<div class="tp-date-selects">` +
-          `<input type="hidden" id="${id}" data-field-id="${esc(c.id)}" value="">` +
+          `<input type="hidden" id="${id}" data-field-id="${esc(c.id)}" value="${esc(c.defaultValue || '')}">` +
           `<select id="${monId}" class="tp-input tp-select tp-date-sel" aria-label="Month">` +
-            `<option value="" disabled selected>Month</option>${monthOpts}` +
+            `<option value="" disabled ${defMon ? '' : 'selected'}>Month</option>${monthOpts}` +
           `</select>` +
           `<select id="${dayId}" class="tp-input tp-select tp-date-sel" aria-label="Day">` +
-            `<option value="" disabled selected>Day</option>${dayOpts}` +
+            `<option value="" disabled ${defDay ? '' : 'selected'}>Day</option>${dayOpts}` +
           `</select>` +
           `<select id="${yrId}" class="tp-input tp-select tp-date-sel" aria-label="Year">` +
-            `<option value="" disabled selected>Year</option>${yearOpts}` +
+            `<option value="" disabled ${defYr ? '' : 'selected'}>Year</option>${yearOpts}` +
           `</select>` +
           `</div>`;
         this._bindings.push(el => {
@@ -759,6 +774,14 @@ class WidgetRenderer {
           const mon    = el.querySelector(`#${monId}`);
           const day    = el.querySelector(`#${dayId}`);
           const yr     = el.querySelector(`#${yrId}`);
+          // Pre-select default values
+          if (defMon && mon) mon.value = defMon;
+          if (defDay && day) day.value = defDay;
+          if (defYr && yr) yr.value = defYr;
+          // If default was set, also seed the form state
+          if (defMon && defDay && defYr) {
+            this.state.setFormValue(gid, c.id, c.defaultValue);
+          }
           const combine = () => {
             const m = mon ? mon.value : '', d = day ? day.value : '', y = yr ? yr.value : '';
             const val = (m && d && y) ? `${y}-${m}-${d}` : '';

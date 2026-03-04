@@ -762,7 +762,7 @@ function handleToolCall(name: string, args: Record<string, unknown>): { content:
               title: 'Appointment Details',
               description: 'Choose your preferred date, time, and meeting type.',
               fields: [
-                { type: 'form_field', id: 'appointmentDate', label: 'Preferred Date', fieldType: 'date', placeholder: 'MM/DD/YYYY', required: true, helperText: `Suggested: ${defaultDateStr}` },
+                { type: 'form_field', id: 'appointmentDate', label: 'Preferred Date', fieldType: 'date', dateRange: 'future', defaultValue: defaultDateStr, placeholder: 'MM/DD/YYYY', required: true, helperText: `Suggested: ${defaultDateStr}` },
                 { type: 'form_field', id: 'appointmentTime', label: 'Preferred Time', fieldType: 'select', required: true, options: [
                   { label: '9:00 AM', value: '09:00' },
                   { label: '10:00 AM', value: '10:00' },
