@@ -127,6 +127,21 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.text({ type: 'text/plain' }));
+
+// ChatGPT Plugin manifest
+// Must be registered before `express.static` because static middleware may short-circuit
+// dot-directories (like `/.well-known`) with a 404 depending on dotfile handling.
+app.get('/.well-known/ai-plugin.json', (_req, res) => {
+  try {
+    const publicDir = path.join(__dirname, '..', '..', 'public');
+    const manifestPath = path.join(publicDir, '.well-known', 'ai-plugin.json');
+    const manifest = fs.readFileSync(manifestPath, 'utf-8');
+    res.type('application/json').send(manifest);
+  } catch (e) {
+    res.status(404).json({ error: 'Plugin manifest not found' });
+  }
+});
+
 app.use(express.static('public', {
   etag: false,
   lastModified: true,
@@ -140,18 +155,6 @@ app.use(express.static('public', {
     }
   },
 }));
-
-// ChatGPT Plugin manifest
-app.get('/.well-known/ai-plugin.json', (_req, res) => {
-  try {
-    const publicDir = path.join(__dirname, '..', '..', 'public');
-    const manifestPath = path.join(publicDir, '.well-known', 'ai-plugin.json');
-    const manifest = fs.readFileSync(manifestPath, 'utf-8');
-    res.type('application/json').send(manifest);
-  } catch (e) {
-    res.status(404).json({ error: 'Plugin manifest not found' });
-  }
-});
 
 // OpenAPI specification
 app.get('/openapi.yaml', (_req, res) => {
