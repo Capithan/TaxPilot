@@ -176,6 +176,19 @@ app.get('/.well-known/ai-plugin.json', (_req, res) => {
   }
 });
 
+// Logo for ChatGPT Plugin (matches logo_url in ai-plugin.json)
+app.get('/logo.png', (_req, res) => {
+  try {
+    const publicDir = path.join(__dirname, '..', '..', 'public');
+    const primaryLogoPath = path.join(publicDir, 'logo.png');
+    const fallbackLogoPath = path.join(publicDir, 'hrb-logo.png');
+    const logoPath = fs.existsSync(primaryLogoPath) ? primaryLogoPath : fallbackLogoPath;
+    res.sendFile(logoPath);
+  } catch {
+    res.status(404).end();
+  }
+});
+
 app.use(express.static('public', {
   etag: false,
   lastModified: true,
