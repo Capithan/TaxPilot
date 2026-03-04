@@ -243,7 +243,7 @@ export function formatAppointmentCreated(
       .field('Complexity', appointment.estimatedComplexity, '📊')
       .highlight('You\'re all set! You\'ll receive reminders before your appointment.')
     )
-    .action('Set Up Reminders', 'create_reminder', {
+    .action('Set Up Reminders', 'create_document_reminders', {
       clientId: appointment.clientId,
       appointmentId: appointment.id,
     }, 'primary', '🔔')
