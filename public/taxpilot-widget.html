@@ -944,7 +944,10 @@ class WidgetRenderer {
   }
 
   _renderProgressBar(c) {
-    const pct = c.total ? Math.round((c.current / c.total) * 100) : c.current;
+    // Support both naming conventions: structured uses value/max, ProgressBarComponent uses current/total
+    const current = c.value ?? c.current ?? 0;
+    const total = c.max ?? c.total ?? 0;
+    const pct = total ? Math.round((current / total) * 100) : current;
     return `<div class="tp-progress"><div class="tp-progress-header"><span class="tp-progress-label">${esc(c.label || '')}</span><span class="tp-progress-pct">${pct}%</span></div><div class="tp-progress-track"><div class="tp-progress-fill" style="width:${pct}%"></div></div></div>`;
   }
 

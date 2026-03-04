@@ -102,7 +102,7 @@ export function formatRoutingResult(result: {
       .field('Availability', slotsText(pro), '📅')
       .highlight(result.message)
     )
-    .action('Book Appointment', 'create_appointment', {
+    .action('Book Appointment', 'show_booking_form', {
       clientId,
       taxProId: pro.id,
     }, 'primary', '📅')
@@ -143,7 +143,7 @@ export function formatTaxProRecommendations(
         clientId,
         taxProId: recommended.id,
       }, 'primary', '✅')
-      .action('Book Directly', 'create_appointment', {
+      .action('Book Directly', 'show_booking_form', {
         clientId,
         taxProId: recommended.id,
       }, 'success', '📅')
@@ -203,7 +203,7 @@ export function formatAppointmentEstimate(estimate: {
     }
   });
 
-  builder.action('Book Appointment', 'create_appointment', { clientId }, 'primary', '📅');
+  builder.action('Book Appointment', 'show_booking_form', { clientId }, 'primary', '📅');
 
   builder.data({
     clientId,
@@ -223,6 +223,12 @@ export function formatAppointmentCreated(
   taxPro: TaxProfessional | null,
   remindersScheduled: number,
 ): UIResponse {
+  // Format date nicely for display
+  const dateStr = appointment.scheduledAt instanceof Date && !isNaN(appointment.scheduledAt.getTime())
+    ? appointment.scheduledAt.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+      + ' at ' + appointment.scheduledAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+    : 'To be confirmed';
+
   return ui.response('appointment_created', 'create_appointment')
     .title('✅ Appointment Confirmed!')
     .banner('Your appointment has been booked!', 'success', { icon: '🎉', confetti: true })
@@ -230,18 +236,18 @@ export function formatAppointmentCreated(
       .icon('📅')
       .badge('Confirmed', 'success', '✅')
       .field('Appointment ID', appointment.id, '🔑')
-      .field('Date & Time', appointment.scheduledAt.toISOString(), '📅')
+      .field('Date & Time', dateStr, '📅')
       .field('Duration', `${appointment.duration} minutes`, '⏱️')
       .field('Type', appointment.type === 'virtual' ? '💻 Virtual Meeting' : '🏢 In Person', '📍')
       .field('Tax Professional', taxPro?.name || appointment.taxProId, '👨‍💼')
       .field('Complexity', appointment.estimatedComplexity, '📊')
-      .field('Reminders', `${remindersScheduled} scheduled`, '🔔')
       .highlight('You\'re all set! You\'ll receive reminders before your appointment.')
     )
-    .action('View Reminders', 'get_client_reminders', {
+    .action('Set Up Reminders', 'create_reminder', {
       clientId: appointment.clientId,
-    }, 'secondary', '🔔')
-    .action('View Checklist', 'get_document_checklist', {
+      appointmentId: appointment.id,
+    }, 'primary', '🔔')
+    .action('View Checklist', 'generate_document_checklist', {
       clientId: appointment.clientId,
     }, 'secondary', '📋')
     .data({

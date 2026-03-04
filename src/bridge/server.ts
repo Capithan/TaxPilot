@@ -604,7 +604,8 @@ const mcpTools = [
   { name: 'get_pending_documents',   title: 'Pending Documents',         description: 'Get the list of required documents the client has not yet provided.', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'] }, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }, _meta: toolMeta('Checking documents…', 'Documents listed') },
   { name: 'route_to_tax_pro',        title: 'Route to Tax Professional', description: 'Analyze client complexity and find the best-matched tax professional for their needs.', inputSchema: { type: 'object', properties: { clientId: { type: 'string' }, selection: { type: 'string', description: 'UI selection value (set by widget)' } } }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, _meta: toolMeta('Finding your tax professional…', 'Match found') },
   { name: 'get_appointment_estimate',title: 'Appointment Estimate',      description: 'Estimate how long the appointment will take based on client complexity and intake completion status.', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'] }, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }, _meta: toolMeta('Estimating appointment…', 'Estimate ready') },
-  { name: 'create_appointment',      title: 'Book Appointment',          description: 'Book an appointment between the client and a tax professional. Use route_to_tax_pro first to get the taxProId.', inputSchema: { type: 'object', properties: { clientId: { type: 'string', description: 'Client ID' }, taxProId: { type: 'string', description: 'Tax professional ID (from route_to_tax_pro)' }, scheduledAt: { type: 'string', description: 'ISO date-time (e.g. 2026-03-15T10:00:00)' }, type: { type: 'string', enum: ['virtual', 'in_person'], description: 'Appointment type' } }, required: ['clientId', 'taxProId', 'scheduledAt'] }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, _meta: toolMeta('Booking appointment…', 'Appointment confirmed!') },
+  { name: 'create_appointment',      title: 'Book Appointment',          description: 'Book an appointment between the client and a tax professional. Use route_to_tax_pro first to get the taxProId.', inputSchema: { type: 'object', properties: { clientId: { type: 'string', description: 'Client ID' }, taxProId: { type: 'string', description: 'Tax professional ID (from route_to_tax_pro)' }, scheduledAt: { type: 'string', description: 'ISO date-time (e.g. 2026-03-15T10:00:00)' }, type: { type: 'string', enum: ['virtual', 'in_person'], description: 'Appointment type' }, formData: { type: 'object', description: 'Form field values from booking form' } }, required: ['clientId'] }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, _meta: toolMeta('Booking appointment…', 'Appointment confirmed!') },
+  { name: 'show_booking_form',       title: 'Show Booking Form',         description: 'Show the appointment booking form where the user can choose a date, time, and meeting type.', inputSchema: { type: 'object', properties: { clientId: { type: 'string', description: 'Client ID' }, taxProId: { type: 'string', description: 'Tax professional ID' } }, required: ['clientId'] }, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }, _meta: toolMeta('Loading booking form…', 'Booking form ready') },
   { name: 'create_reminder',         title: 'Create Document Reminders', description: 'Create automated reminders for a client about all pending documents.', inputSchema: { type: 'object', properties: { clientId: { type: 'string' }, appointmentId: { type: 'string', description: 'Optional appointment ID to link reminders to' } }, required: ['clientId'] }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, _meta: toolMeta('Setting up reminders…', 'Reminders created') },
   { name: 'send_reminder',           title: 'Send Reminder',             description: 'Send a specific reminder notification to a client.', inputSchema: { type: 'object', properties: { reminderId: { type: 'string' } }, required: ['reminderId'] }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true }, _meta: toolMeta('Sending reminder…', 'Reminder sent!') },
   { name: 'get_client_reminders',    title: 'View Reminders',            description: 'Get all reminders scheduled for a client including sent and pending.', inputSchema: { type: 'object', properties: { clientId: { type: 'string' } }, required: ['clientId'] }, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }, _meta: toolMeta('Loading reminders…', 'Reminders loaded') },
@@ -728,15 +729,119 @@ function handleToolCall(name: string, args: Record<string, unknown>): { content:
         return toMcpContent(formatEstimateUI(estimate, args.clientId as string));
       }
 
+      case 'show_booking_form': {
+        const bfClientId = args.clientId as string;
+        const bfTaxProId = args.taxProId as string | undefined;
+        const bfClient = db.getClient(bfClientId);
+        // Resolve taxProId: explicit arg → client.assignedTaxPro
+        const resolvedTaxProId = bfTaxProId || bfClient?.assignedTaxPro;
+        const bfTaxPro = resolvedTaxProId ? db.getTaxPro(resolvedTaxProId) : null;
+
+        // Build a default date 3 days from now at 10:00 AM
+        const defaultDate = new Date();
+        defaultDate.setDate(defaultDate.getDate() + 3);
+        const defaultDateStr = `${defaultDate.getFullYear()}-${String(defaultDate.getMonth()+1).padStart(2,'0')}-${String(defaultDate.getDate()).padStart(2,'0')}`;
+
+        const bookingUI: Record<string, unknown> = {
+          id: `booking-${Date.now()}`,
+          screen: 'appointment_booking',
+          components: [
+            { type: 'banner', text: `Book your appointment${bfTaxPro ? ` with ${bfTaxPro.name}` : ''}`, variant: 'info', icon: '📅' },
+            { type: 'text_block', text: 'Schedule Your Appointment', style: 'heading' },
+            ...(bfTaxPro ? [{
+              type: 'info_card',
+              title: bfTaxPro.name,
+              badge: { text: '⭐ Assigned', variant: 'success' },
+              fields: [
+                { label: 'Rating', value: `${'⭐'.repeat(Math.floor(bfTaxPro.rating))} (${bfTaxPro.rating}/5)`, icon: '⭐' },
+                { label: 'Specializations', value: bfTaxPro.specializations.map((s: string) => s.replace(/_/g, ' ')).join(', '), icon: '📌' },
+              ],
+            }] : []),
+            {
+              type: 'form_group',
+              title: 'Appointment Details',
+              description: 'Choose your preferred date, time, and meeting type.',
+              fields: [
+                { type: 'form_field', id: 'appointmentDate', label: 'Preferred Date', fieldType: 'date', placeholder: 'MM/DD/YYYY', required: true, helperText: `Suggested: ${defaultDateStr}` },
+                { type: 'form_field', id: 'appointmentTime', label: 'Preferred Time', fieldType: 'select', required: true, options: [
+                  { label: '9:00 AM', value: '09:00' },
+                  { label: '10:00 AM', value: '10:00' },
+                  { label: '11:00 AM', value: '11:00' },
+                  { label: '12:00 PM', value: '12:00' },
+                  { label: '1:00 PM', value: '13:00' },
+                  { label: '2:00 PM', value: '14:00' },
+                  { label: '3:00 PM', value: '15:00' },
+                  { label: '4:00 PM', value: '16:00' },
+                ] },
+                { type: 'form_field', id: 'appointmentType', label: 'Meeting Type', fieldType: 'select', required: true, options: [
+                  { label: '💻 Virtual Meeting', value: 'virtual' },
+                  { label: '🏢 In Person', value: 'in_person' },
+                ] },
+              ],
+              submitLabel: '📅 Confirm Booking',
+              action: {
+                type: 'tool_call',
+                tool: 'create_appointment',
+                toolName: 'create_appointment',
+                parameters: { clientId: bfClientId, taxProId: resolvedTaxProId || '' },
+              },
+            },
+          ],
+          stateUpdates: { screen: 'appointment_booking' },
+          data: { clientId: bfClientId, taxProId: resolvedTaxProId },
+          _meta: { toolName: 'show_booking_form', timestamp: new Date().toISOString(), nextSuggestedTools: ['create_appointment'] },
+        };
+        return { content: [{ type: 'text', text: 'Please choose your appointment date and time.' }], structuredContent: bookingUI };
+      }
+
       case 'create_appointment': {
         const clientId = args.clientId as string;
+        const client = db.getClient(clientId);
+
+        // Resolve taxProId: explicit arg → client.assignedTaxPro → error
+        let taxProId = args.taxProId as string | undefined;
+        if (!taxProId && client?.assignedTaxPro) {
+          taxProId = client.assignedTaxPro;
+        }
+        if (!taxProId) {
+          return { content: [{ type: 'text', text: 'No tax professional assigned. Please use "Route to Tax Pro" first.' }] };
+        }
+
+        // Parse scheduledAt from form data or direct arg
+        let scheduledAt: Date;
+        const formData = args.formData as Record<string, string> | undefined;
+        if (formData && formData.appointmentDate) {
+          // Form submission: combine date + time
+          const datePart = formData.appointmentDate; // MM/DD/YYYY or YYYY-MM-DD
+          const timePart = formData.appointmentTime || '10:00';
+          // Try to parse flexibly
+          const dateObj = new Date(`${datePart}T${timePart}:00`);
+          scheduledAt = isNaN(dateObj.getTime()) ? new Date(datePart + ' ' + timePart) : dateObj;
+        } else if (args.scheduledAt) {
+          scheduledAt = new Date(args.scheduledAt as string);
+        } else {
+          // Default: 3 business days from now at 10 AM
+          scheduledAt = new Date();
+          scheduledAt.setDate(scheduledAt.getDate() + 3);
+          scheduledAt.setHours(10, 0, 0, 0);
+        }
+
+        // Final sanity check
+        if (isNaN(scheduledAt.getTime())) {
+          scheduledAt = new Date();
+          scheduledAt.setDate(scheduledAt.getDate() + 3);
+          scheduledAt.setHours(10, 0, 0, 0);
+        }
+
+        const appointmentType = (formData?.appointmentType || args.type as string || 'virtual') as 'virtual' | 'in_person';
+
         const appointment = createAppointment(
           clientId,
-          args.taxProId as string,
-          new Date(args.scheduledAt as string),
-          (args.type as 'virtual' | 'in_person') || 'virtual'
+          taxProId,
+          scheduledAt,
+          appointmentType
         );
-        const taxPro = db.getTaxPro(args.taxProId as string) ?? null;
+        const taxPro = db.getTaxPro(taxProId) ?? null;
         return toMcpContent(formatAppointmentCreated(appointment, taxPro, 0));
       }
 
