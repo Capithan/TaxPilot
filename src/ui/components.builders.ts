@@ -8,6 +8,8 @@
 import type {
   SessionScreen,
   SessionState,
+  ThemeMode,
+  Platform,
   ButtonComponent,
   ButtonVariant,
   ButtonSize,
@@ -359,6 +361,18 @@ export class StructuredResponseBuilder {
   /** Set raw data */
   data(data: Record<string, unknown>): this {
     this._resp.data = data;
+    return this;
+  }
+
+  /** Set the theme mode (light/dark) for the response */
+  theme(mode: ThemeMode): this {
+    this._resp.theme = mode;
+    return this;
+  }
+
+  /** Set the target platform (web/ios/android) */
+  platform(p: Platform): this {
+    this._resp.platform = p;
     return this;
   }
 

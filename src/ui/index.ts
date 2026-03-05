@@ -51,6 +51,8 @@ export * as welcomeUI from './formatters/welcome.js';
 
 // ── Structured UI Component System ─────────────────────────────
 export type {
+  ThemeMode,
+  Platform,
   SessionScreen,
   SessionState,
   ButtonComponent,
@@ -117,7 +119,16 @@ export {
 } from './components.builders.js';
 
 // ── Theme ───────────────────────────────────────────────────────
-export { hrbTheme, getVariantColors, getThemeCSSVars } from './theme.js';
+export {
+  hrbTheme,
+  hrbThemeLight,
+  hrbThemeDark,
+  getTheme,
+  getVariantColors,
+  getThemeCSSVars,
+  getPlatformCSS,
+} from './theme.js';
+export type { HrbTheme } from './theme.js';
 
 // ── Structured formatters (examples) ────────────────────────────
 export * as structuredExamples from './formatters/structured.examples.js';

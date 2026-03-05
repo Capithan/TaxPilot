@@ -1730,27 +1730,55 @@
     setTimeout(function(){ toast.remove(); }, 8000);
   });
 
-  // ── Dark Mode Toggle ──────────────────────────────────
-  function toggleDarkMode() {
-    const html = document.documentElement;
-    const isDark = html.dataset.theme === 'dark';
-    html.dataset.theme = isDark ? 'light' : 'dark';
-    localStorage.setItem('tp-theme', isDark ? 'light' : 'dark');
-    // Update icon
-    const icon = document.getElementById('themeIcon');
+  // ── Theme Management (Light/Dark, from GPT or user toggle) ─────
+  /**
+   * Apply a theme mode ('light' or 'dark') to the document.
+   * Updates CSS custom properties, localStorage, and the toggle icon.
+   * Called when:
+   *   1. GPT sends a `theme` field in StructuredUIResponse
+   *   2. User clicks the dark-mode toggle button
+   *   3. On load (from localStorage or OS preference)
+   */
+  function applyTheme(mode) {
+    var isDark = mode === 'dark';
+    document.documentElement.dataset.theme = mode;
+    localStorage.setItem('tp-theme', mode);
+    // Update the header toggle icon
+    var icon = document.getElementById('themeIcon');
     if (icon) {
       icon.innerHTML = isDark
-        ? '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>'
-        : '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>';
+        ? '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>'
+        : '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>';
     }
+    console.log('[TaxPilot] Theme applied:', mode);
   }
-  // Restore saved theme preference
+
+  /** Returns the current theme mode */
+  function getCurrentTheme() {
+    return document.documentElement.dataset.theme || 'light';
+  }
+
+  /** Toggle between light and dark */
+  function toggleDarkMode() {
+    applyTheme(getCurrentTheme() === 'dark' ? 'light' : 'dark');
+  }
+
+  // Restore saved theme preference (localStorage > OS preference)
   (function() {
     var saved = localStorage.getItem('tp-theme');
-    if (saved === 'dark') {
-      document.documentElement.dataset.theme = 'dark';
-      var icon = document.getElementById('themeIcon');
-      if (icon) icon.innerHTML = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>';
+    if (saved === 'dark' || saved === 'light') {
+      applyTheme(saved);
+    } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      applyTheme('dark');
+    }
+    // Listen for OS-level theme changes
+    if (window.matchMedia) {
+      window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(e) {
+        // Only auto-switch if the user hasn't explicitly chosen a theme
+        if (!localStorage.getItem('tp-theme')) {
+          applyTheme(e.matches ? 'dark' : 'light');
+        }
+      });
     }
   })();
 
@@ -1787,6 +1815,9 @@
     },
     onAction: function(action) {
       handleUIAction(action);
+    },
+    onThemeChange: function(theme) {
+      if (typeof applyTheme === 'function') applyTheme(theme);
     },
   });
 
@@ -2039,6 +2070,12 @@
    */
   function addStructuredMessage(structuredUI, textReply) {
     console.log('[TaxPilot] addStructuredMessage called. screen:', structuredUI.screen, 'components:', (structuredUI.components || []).length);
+
+    // ── Apply theme from GPT response ───────────────────
+    if (structuredUI.theme && (structuredUI.theme === 'light' || structuredUI.theme === 'dark')) {
+      applyTheme(structuredUI.theme);
+    }
+
     var welcome = document.getElementById('welcome');
     if (welcome) welcome.remove();
 

@@ -226,6 +226,9 @@ export function uiResponseToStructured(resp: Record<string, unknown>): Record<st
       ...(uiResp._meta?.flowStage ? { flowStage: uiResp._meta.flowStage } : {}),
     },
     data: uiResp.data || {},
+    // Carry over theme and platform when present on the input
+    ...(resp.theme ? { theme: resp.theme } : {}),
+    ...(resp.platform ? { platform: resp.platform } : {}),
     _meta: {
       toolName: uiResp._meta?.toolName || '',
       timestamp: uiResp._meta?.timestamp || new Date().toISOString(),

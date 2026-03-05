@@ -3,6 +3,7 @@
  *
  * Converts a UIResponse or StructuredUIResponse into a complete, self-contained
  * HTML document with inline CSS (using the HRB brand theme).
+ * Supports light/dark theme modes and platform-specific (web/ios/android) hints.
  *
  * This runs on the SERVER and produces STATIC HTML that can be returned via
  * resources/read.  The document needs ZERO JavaScript — ChatGPT simply renders
@@ -11,6 +12,9 @@
  * This solves the "Waiting for tool results" problem by pre-rendering the tool
  * result so the widget never needs to fetch data at runtime.
  */
+
+import type { ThemeMode, Platform } from './components.types.js';
+import { getTheme, getPlatformCSS } from './theme.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -301,10 +305,19 @@ function renderUIResponseBody(resp: Record<string, unknown>): string {
  * Build a complete self-contained HTML document from a UIResponse or
  * StructuredUIResponse.  Includes all CSS inline.  No JavaScript.
  *
+ * Supports theme (light/dark) and platform (web/ios/android) from the
+ * response payload.  When present, the CSS variables and platform-specific
+ * styles are injected automatically.
+ *
  * Returns null if there is nothing to render.
  */
 export function toHtmlWidget(resp: Record<string, unknown> | null | undefined): string | null {
   if (!resp) return null;
+
+  // Extract theme/platform hints from the response
+  const themeMode = (resp.theme as ThemeMode | undefined) || 'light';
+  const platform  = (resp.platform as Platform | undefined) || 'web';
+  const theme = getTheme(themeMode);
 
   // Render the body content
   let bodyHtml = '';
@@ -325,8 +338,11 @@ export function toHtmlWidget(resp: Record<string, unknown> | null | undefined): 
 
   if (!bodyHtml.trim()) return null;
 
+  // Build dynamic CSS variables from the resolved theme
+  const c = theme.colors;
+
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="${themeMode}" data-platform="${platform}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -334,17 +350,18 @@ export function toHtmlWidget(resp: Record<string, unknown> | null | undefined): 
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
-  --hrb-green: #00A13A; --hrb-green-dark: #008830; --hrb-green-light: #E6F5EC;
-  --hrb-beige: #F5F0E8; --hrb-beige-dark: #EDE5D8;
-  --hrb-text: #1a1a1a; --hrb-text-light: #555; --hrb-text-muted: #888;
-  --hrb-border: #e0ddd5; --hrb-white: #ffffff;
-  --hrb-danger: #D32F2F; --hrb-warning: #F9A825; --hrb-info: #1976D2;
+  --hrb-green: ${c.brand.primary}; --hrb-green-dark: ${c.brand.primaryDark}; --hrb-green-light: ${c.brand.primaryLight};
+  --hrb-beige: ${c.surface.background}; --hrb-beige-dark: ${c.surface.backgroundAlt};
+  --hrb-text: ${c.text.primary}; --hrb-text-light: ${c.text.secondary}; --hrb-text-muted: ${c.text.muted};
+  --hrb-border: ${c.border.default}; --hrb-white: ${c.surface.card};
+  --hrb-danger: ${c.status.error}; --hrb-warning: ${c.status.warning}; --hrb-info: ${c.status.info};
   --hrb-radius: 12px; --hrb-radius-sm: 8px;
-  --hrb-shadow: 0 2px 8px rgba(0,0,0,0.08); --hrb-shadow-lg: 0 4px 16px rgba(0,0,0,0.12);
+  --hrb-shadow: ${theme.shadow.md}; --hrb-shadow-lg: ${theme.shadow.lg};
   --hrb-transition: 0.2s ease;
 }
+${getPlatformCSS(platform)}
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: ${theme.typography.fontFamily};
   font-size: 14px; line-height: 1.5; color: var(--hrb-text);
   background: transparent; padding: 0; overflow-x: hidden;
 }

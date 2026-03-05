@@ -84,15 +84,18 @@ class SessionStateManager {
 class TaxPilotRenderer {
   /**
    * @param {Object} opts
-   * @param {Function} opts.onAction   – called when a UI action fires
-   *                                     (action) => void
-   * @param {Function} opts.onNavigate – called when the screen changes
-   *                                     (screen) => void
+   * @param {Function} opts.onAction      – called when a UI action fires
+   *                                        (action) => void
+   * @param {Function} opts.onNavigate    – called when the screen changes
+   *                                        (screen) => void
+   * @param {Function} opts.onThemeChange – called when the response carries a theme
+   *                                        ('light'|'dark') => void
    * @param {SessionStateManager} opts.state
    */
   constructor(opts = {}) {
     this.onAction = opts.onAction || (() => {});
     this.onNavigate = opts.onNavigate || (() => {});
+    this.onThemeChange = opts.onThemeChange || (() => {});
     this.state = opts.state || new SessionStateManager();
     this._pendingBinds = [];
   }
@@ -127,6 +130,11 @@ class TaxPilotRenderer {
   /**
    * Render a StructuredUIResponse to an HTML string.
    * Call `bind(containerEl)` afterwards to attach event handlers.
+   *
+   * If the response includes `theme` ('light'|'dark') or `platform`
+   * ('web'|'ios'|'android'), those are set as data-attributes on the
+   * wrapper so CSS can target them. The parent page (chat.html) is also
+   * updated via onThemeChange when present.
    */
   render(response) {
     if (!response || !response.components) return '';
@@ -140,8 +148,15 @@ class TaxPilotRenderer {
       }
     }
 
+    // Propagate theme to host page when the response carries one
+    if (response.theme && typeof this.onThemeChange === 'function') {
+      this.onThemeChange(response.theme);
+    }
+
+    const themeAttr = response.theme ? ` data-theme="${response.theme}"` : '';
+    const platformAttr = response.platform ? ` data-platform="${response.platform}"` : '';
     const parts = response.components.map(c => this._renderComponent(c));
-    return `<div class="tp-structured" data-screen="${response.screen || ''}">${parts.join('')}</div>`;
+    return `<div class="tp-structured" data-screen="${response.screen || ''}"${themeAttr}${platformAttr}>${parts.join('')}</div>`;
   }
 
   /** Attach event listeners to rendered HTML inside containerEl */

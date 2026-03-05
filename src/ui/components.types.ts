@@ -11,6 +11,16 @@
  */
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// THEME & PLATFORM
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/** Theme mode — 'light' or 'dark'. Can be sent from GPT or detected on client. */
+export type ThemeMode = 'light' | 'dark';
+
+/** Target platform for rendering hints. */
+export type Platform = 'web' | 'ios' | 'android';
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // SESSION STATES
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -445,6 +455,17 @@ export interface StructuredUIResponse {
   stateUpdates?: Partial<SessionState>;
   /** Raw data for ChatGPT's internal reference (not rendered) */
   data?: Record<string, unknown>;
+  /**
+   * Theme preference for this response.
+   * When set, the frontend applies 'light' or 'dark' mode.
+   * If omitted the client keeps its current / OS-preferred theme.
+   */
+  theme?: ThemeMode;
+  /**
+   * Target platform hint — lets renderers apply platform-specific tweaks
+   * (e.g. iOS safe-area insets, Android Material ripple, web hover states).
+   */
+  platform?: Platform;
   /** Metadata */
   _meta: {
     toolName: string;
